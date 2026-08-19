@@ -24,6 +24,10 @@ import gun from '../assets/textures/gun.png'
 import gunAccent from '../assets/textures/gun-accent.png'
 import gunMetal from '../assets/textures/gun-metal.png'
 import pillar from '../assets/textures/pillar.png'
+import ramp from '../assets/textures/ramp.png'
+import sphere from '../assets/textures/sphere.png'
+import stairs from '../assets/textures/stairs.png'
+import block from '../assets/textures/block.png'
 import wall from '../assets/textures/wall.png'
 
 export const maps = {
@@ -31,6 +35,10 @@ export const maps = {
   wall,
   pillar,
   crate,
+  stairs,
+  ramp,
+  block,
+  sphere,
   head,
   headFront,
   headTop,
@@ -218,4 +226,32 @@ function UniformPixelPart({ size, position, map, ...material }: PixelPartProps) 
 
 export function PixelPart(props: PixelPartProps) {
   return props.faces ? <FacedPixelPart {...props} faces={props.faces} /> : <UniformPixelPart {...props} />
+}
+
+type PixelSphereProps = {
+  radius: number
+  map: string
+  castShadow?: boolean
+  receiveShadow?: boolean
+} & Omit<MaterialOpts, 'attach'>
+
+export function PixelSphere({
+  radius,
+  map,
+  castShadow = true,
+  receiveShadow = true,
+  ...material
+}: PixelSphereProps) {
+  const texture = usePixelMap(map)
+  useLayoutEffect(() => {
+    texture.repeat.set(2, 1)
+    texture.needsUpdate = true
+  }, [texture])
+
+  return (
+    <mesh castShadow={castShadow} receiveShadow={receiveShadow}>
+      <sphereGeometry args={[radius, 18, 14]} />
+      <PixelMaterial map={texture} {...material} />
+    </mesh>
+  )
 }

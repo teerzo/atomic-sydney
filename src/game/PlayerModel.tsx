@@ -5,9 +5,12 @@ import { PixelPart, maps } from './pixelArt'
 
 const POSE_LAMBDA = 14
 const GUN_BLEND_LAMBDA = 11
+const GUN_AIM_LAMBDA = 18
 const UPPER_LEN = 0.24
 const LOWER_LEN = 0.24
-const HIP_GUN_PITCH = (-20 * Math.PI) / 180
+const THIGH_LEN = 0.32
+const SHIN_LEN = 0.32
+const IDLE_BOB_SPEED = 2.35
 const HIP_GUN_POS = new Vector3(0.16, 0.1, -0.26)
 const ADS_GUN_POS = new Vector3(0.2, 0.38, -0.36)
 
@@ -36,10 +39,8 @@ const _rightTarget = new Vector3()
 const _leftTarget = new Vector3()
 const _rightPole = new Vector3()
 const _leftPole = new Vector3()
-const _hipQuat = new Quaternion()
-const _adsQuat = new Quaternion()
-const _hipEuler = new Euler()
-const _adsEuler = new Euler()
+const _aimQuat = new Quaternion()
+const _aimEuler = new Euler()
 const _toTarget = new Vector3()
 const _dir = new Vector3()
 const _axis = new Vector3()
@@ -60,6 +61,10 @@ function dampEuler(group: Group | null, x: number, y: number, z: number, lambda:
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
+}
+
+function legReachY(thighX: number, kneeX: number) {
+  return -THIGH_LEN * Math.cos(thighX) - SHIN_LEN * Math.cos(thighX + kneeX)
 }
 
 function applyTwoBoneIK(
@@ -190,9 +195,9 @@ export function PlayerModel({ locomotion, muzzle }: PlayerModelProps) {
 
     if (sliding) {
       bobY = -0.12
-      pitchX = 0.72
-      hipY = 0.08
-      leanZ = -0.12
+      pitchX = 0.18
+      hipY = 0.04
+      leanZ = -0.08
       lThigh = { x: 0.85, y: 0.18, z: 0.22 }
       rThigh = { x: 1.55, y: -0.08, z: -0.12 }
       lKnee = { x: -2.15, y: 0, z: 0 }
@@ -232,7 +237,21 @@ export function PlayerModel({ locomotion, muzzle }: PlayerModelProps) {
       lFoot.x = crouched ? 0.55 : 0.06 + Math.max(0, leftSwing) * 0.2
       rFoot.x = crouched ? 0.55 : 0.06 + Math.max(0, rightSwing) * 0.2
     } else {
-      bobY += Math.sin(t * 2.2) * (crouched ? 0.018 : 0.032)
+      const idle = crouched ? 0.55 : 1
+      const flex = 0.5 + 0.5 * Math.sin(t * IDLE_BOB_SPEED)
+      const thighFlex = flex * 0.18 * idle
+      const kneeFlex = -flex * 0.32 * idle
+      lThigh.x = squat + thighFlex
+      rThigh.x = squat + thighFlex * 0.92
+      lKnee.x = kneeSquat + kneeFlex
+      rKnee.x = kneeSquat + kneeFlex * 0.94
+      lFoot.x = (crouched ? 0.62 : 0.06) + flex * 0.14 * idle
+      rFoot.x = (crouched ? 0.62 : 0.06) + flex * 0.12 * idle
+      const plantedY = legReachY(squat, kneeSquat)
+      const leftY = legReachY(lThigh.x, lKnee.x)
+      const rightY = legReachY(rThigh.x, rKnee.x)
+      bobY += plantedY - (leftY + rightY) * 0.5
+      hipY = Math.sin(t * IDLE_BOB_SPEED) * 0.025 * idle
     }
 
     if (bob.current) {
@@ -243,15 +262,12 @@ export function PlayerModel({ locomotion, muzzle }: PlayerModelProps) {
       bob.current.rotation.z = damp(bob.current.rotation.z, leanZ, POSE_LAMBDA, delta)
     }
 
-    aimBlend.current = damp(aimBlend.current, aiming ? 1 : 0, GUN_BLEND_LAMBDA, delta)
+    aimBlend.current = damp(aimBlend.current, aiming || sliding ? 1 : 0, GUN_BLEND_LAMBDA, delta)
     if (gun.current) {
-      const blend = aimBlend.current
-      gun.current.position.lerpVectors(HIP_GUN_POS, ADS_GUN_POS, blend)
-      _hipEuler.set(HIP_GUN_PITCH, 0, 0)
-      _adsEuler.set(-aimPitch, aimYawOffset, 0)
-      _hipQuat.setFromEuler(_hipEuler)
-      _adsQuat.setFromEuler(_adsEuler)
-      gun.current.quaternion.slerpQuaternions(_hipQuat, _adsQuat, blend)
+      gun.current.position.lerpVectors(HIP_GUN_POS, ADS_GUN_POS, aimBlend.current)
+      _aimEuler.set(-aimPitch - pitchX, aimYawOffset, 0)
+      _aimQuat.setFromEuler(_aimEuler)
+      gun.current.quaternion.slerp(_aimQuat, 1 - Math.exp(-GUN_AIM_LAMBDA * delta))
       gun.current.updateWorldMatrix(true, true)
     }
 

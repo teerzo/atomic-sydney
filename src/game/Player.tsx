@@ -11,8 +11,9 @@ const CROUCH_SPEED_SCALE = 0.45
 const SPRINT_SPEED_SCALE = 1.55
 const SLIDE_DECEL = 7.5
 const JUMP_VELOCITY = 7.5
-const GROUND_ACCEL = 42
-const AIR_ACCEL = 42
+const GROUND_ACCEL = 14
+const AIR_MOVE_SCALE = 0.1
+const MOVE_RAMP_TIME = 0.85
 const GROUND_FRICTION = 32
 const GROUND_STOP_SPEED = 1.5
 const CAMERA_DISTANCE = 6.2
@@ -60,25 +61,6 @@ function dampAngle(current: number, target: number, lambda: number, dt: number, 
   const maxStep = maxSpeed * dt
   const step = Math.max(-maxStep, Math.min(maxStep, delta * (1 - Math.exp(-lambda * dt))))
   return current + step
-}
-
-function accelerate(
-  vx: number,
-  vz: number,
-  wishX: number,
-  wishZ: number,
-  accel: number,
-  dt: number,
-  maxSpeed: number,
-) {
-  const wishSpeed = Math.hypot(wishX, wishZ)
-  if (wishSpeed < 1e-6) return { x: vx, z: vz }
-  const nx = wishX / wishSpeed
-  const nz = wishZ / wishSpeed
-  const along = vx * nx + vz * nz
-  const add = Math.min(maxSpeed - along, accel * dt)
-  if (add <= 0) return { x: vx, z: vz }
-  return { x: vx + nx * add, z: vz + nz * add }
 }
 
 function applyGroundFriction(vx: number, vz: number, dt: number) {
@@ -146,6 +128,7 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
   })
   const crouched = useRef(false)
   const crouchHeld = useRef(false)
+  const sprintHeld = useRef(false)
   const aiming = useRef(false)
   const shoulder = useRef(1)
   const shoulderHeld = useRef(false)
@@ -158,7 +141,8 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
   const visualYaw = useRef(0)
   const airWishWorld = useRef({ x: 0, z: 0 })
   const airLocked = useRef(false)
-  const airSpeed = useRef(MOVE_SPEED)
+  const airSpeed = useRef(0)
+  const moveHold = useRef(0)
   const sliding = useRef(false)
   const slideDir = useRef({ x: 0, z: 0 })
   const slideSpeed = useRef(MOVE_SPEED)
@@ -239,6 +223,8 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     const { forward, back, left, right, jump, sprint, crouch, shoulder: shoulderKey } = get()
     const crouchPressed = crouch && !crouchHeld.current
     crouchHeld.current = crouch
+    const sprintPressed = sprint && !sprintHeld.current
+    sprintHeld.current = sprint
     if (shoulderKey && !shoulderHeld.current) {
       shoulder.current *= -1
     }
@@ -330,19 +316,34 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
       setCrouched(false)
       stoodFromJump = wasCrouched && !crouched.current
     }
+    if (sprintPressed && crouched.current) {
+      sliding.current = false
+      setCrouched(false)
+    }
 
     const halfHeight = currentHalfHeight(crouched.current)
     const jumped = jump && grounded && !crouched.current && !stoodFromJump
     const sprinting = sprint && !crouched.current && !sliding.current
-    const groundSpeed =
+    const dt = Math.min(delta, 0.05)
+    if (grounded && !jumped && !sliding.current) {
+      moveHold.current = localLen > 0 ? moveHold.current + dt : 0
+    }
+    const maxSpeed =
       MOVE_SPEED * (crouched.current ? CROUCH_SPEED_SCALE : sprinting ? SPRINT_SPEED_SCALE : 1)
+    const ramp = Math.min(1, moveHold.current / MOVE_RAMP_TIME)
+    const groundSpeed = maxSpeed * ramp
 
     if (jumped || (!grounded && !airLocked.current)) {
-      const launched = worldWishFromCamera(localX, localZ, yaw.current, 1)
+      const fromVel = horizSpeed > 0.15
+      const launched = fromVel
+        ? { x: velocity.x / horizSpeed, z: velocity.z / horizSpeed }
+        : worldWishFromCamera(localX, localZ, yaw.current, 1)
       airWishWorld.current = sliding.current
         ? { x: slideDir.current.x, z: slideDir.current.z }
         : { x: launched.x, z: launched.z }
-      airSpeed.current = sliding.current ? slideSpeed.current : groundSpeed
+      airSpeed.current = sliding.current
+        ? slideSpeed.current
+        : Math.max(horizSpeed, localLen > 0 ? groundSpeed : 0)
       airLocked.current = true
       sliding.current = false
     }
@@ -366,10 +367,13 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     locomotion.current.sliding = sliding.current
     locomotion.current.aiming = aiming.current
     const speed = inAir ? airSpeed.current : groundSpeed
-    const wishX = inAir ? airWishWorld.current.x * speed : moveX * speed
-    const wishZ = inAir ? airWishWorld.current.z * speed : moveZ * speed
+    const wishX = inAir
+      ? airWishWorld.current.x * speed + moveX * maxSpeed * AIR_MOVE_SCALE
+      : moveX * speed
+    const wishZ = inAir
+      ? airWishWorld.current.z * speed + moveZ * maxSpeed * AIR_MOVE_SCALE
+      : moveZ * speed
 
-    const dt = Math.min(delta, 0.05)
     let nextX = velocity.x
     let nextZ = velocity.z
     if (sliding.current && grounded) {
@@ -390,29 +394,20 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
         nextX = stopped.x
         nextZ = stopped.z
       }
-    } else if (airWishWorld.current.x !== 0 || airWishWorld.current.z !== 0) {
-      const gained = accelerate(nextX, nextZ, wishX, wishZ, AIR_ACCEL, dt, speed)
-      nextX = gained.x
-      nextZ = gained.z
+    } else {
+      nextX = wishX
+      nextZ = wishZ
     }
     const nextY = jumped ? JUMP_VELOCITY : velocity.y
     rigidBody.setLinvel({ x: nextX, y: nextY, z: nextZ }, true)
 
-    if (aiming.current) {
+    if (aiming.current || sliding.current) {
       visualYaw.current = dampAngle(
         visualYaw.current,
         yaw.current,
         AIM_TURN_LAMBDA,
         delta,
         AIM_TURN_MAX_RAD_PER_SEC,
-      )
-    } else if (sliding.current) {
-      visualYaw.current = dampAngle(
-        visualYaw.current,
-        Math.atan2(-slideDir.current.x, -slideDir.current.z),
-        MOVE_TURN_LAMBDA,
-        delta,
-        MOVE_TURN_MAX_RAD_PER_SEC,
       )
     } else if (length > 0) {
       const moveYaw = Math.atan2(-moveX, -moveZ)
