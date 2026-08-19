@@ -17,8 +17,10 @@ const ADS_LOOK_SCALE = 0.65
 const CAMERA_FOLLOW_LAMBDA = 6
 const LOOK_HEIGHT_LAMBDA = 8
 const ZOOM_LAMBDA = 8
-const VISUAL_TURN_LAMBDA = 18
-const VISUAL_TURN_MAX_RAD_PER_SEC = 16
+const MOVE_TURN_LAMBDA = 32
+const MOVE_TURN_MAX_RAD_PER_SEC = 50
+const AIM_TURN_LAMBDA = 9
+const AIM_TURN_MAX_RAD_PER_SEC = 10
 const LOOK_HEIGHT = 1.15
 const CROUCH_LOOK_HEIGHT = 0.7
 const CAPSULE_RADIUS = 0.4
@@ -242,15 +244,21 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     rigidBody.setLinvel({ x: moveX, y: nextY, z: moveZ }, true)
 
     if (aiming.current) {
-      visualYaw.current = yaw.current
+      visualYaw.current = dampAngle(
+        visualYaw.current,
+        yaw.current,
+        AIM_TURN_LAMBDA,
+        delta,
+        AIM_TURN_MAX_RAD_PER_SEC,
+      )
     } else if (length > 0) {
       const moveYaw = Math.atan2(-moveX, -moveZ)
       visualYaw.current = dampAngle(
         visualYaw.current,
         moveYaw,
-        VISUAL_TURN_LAMBDA,
+        MOVE_TURN_LAMBDA,
         delta,
-        VISUAL_TURN_MAX_RAD_PER_SEC,
+        MOVE_TURN_MAX_RAD_PER_SEC,
       )
     }
     if (visual.current) {
