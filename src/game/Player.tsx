@@ -97,12 +97,6 @@ function worldWishFromCamera(localX: number, localZ: number, yaw: number, speed:
   return { x: (rx * localX + fx * localZ) * speed, z: (rz * localX + fz * localZ) * speed }
 }
 
-function rotateYawXZ(x: number, z: number, dYaw: number) {
-  const cos = Math.cos(dYaw)
-  const sin = Math.sin(dYaw)
-  return { x: x * cos + z * sin, z: -x * sin + z * cos }
-}
-
 function moveVecToward(vx: number, vz: number, tx: number, tz: number, maxDelta: number) {
   const dx = tx - vx
   const dz = tz - vz
@@ -160,10 +154,9 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
   const yaw = useRef(0)
   const pitch = useRef(0.28)
   const visualYaw = useRef(0)
-  const airWishLocal = useRef({ x: 0, z: 0 })
+  const airWishWorld = useRef({ x: 0, z: 0 })
   const airLocked = useRef(false)
   const airSpeed = useRef(MOVE_SPEED)
-  const prevYaw = useRef(0)
   const { gl } = useThree()
   const { rapier, world } = useRapier()
   const downRay = useRef(new rapier.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: -1, z: 0 })).current
@@ -306,7 +299,8 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
       MOVE_SPEED * (crouched.current ? CROUCH_SPEED_SCALE : sprinting ? SPRINT_SPEED_SCALE : 1)
 
     if (jumped || (!grounded && !airLocked.current)) {
-      airWishLocal.current = { x: localX, z: localZ }
+      const launched = worldWishFromCamera(localX, localZ, yaw.current, 1)
+      airWishWorld.current = { x: launched.x, z: launched.z }
       airSpeed.current = groundSpeed
       airLocked.current = true
     }
@@ -315,24 +309,22 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     }
 
     const inAir = !grounded || jumped
-    const wishLocalX = inAir ? airWishLocal.current.x : localX
-    const wishLocalZ = inAir ? airWishLocal.current.z : localZ
-    const move = worldWishFromCamera(wishLocalX, wishLocalZ, yaw.current, 1)
+    const move = worldWishFromCamera(localX, localZ, yaw.current, 1)
     const moveX = move.x
     const moveZ = move.z
     const length = Math.hypot(moveX, moveZ)
 
-    locomotion.current.forward = wishLocalZ > 0.5
-    locomotion.current.back = wishLocalZ < -0.5
-    locomotion.current.left = wishLocalX < -0.5
-    locomotion.current.right = wishLocalX > 0.5
+    locomotion.current.forward = localZ > 0.5
+    locomotion.current.back = localZ < -0.5
+    locomotion.current.left = localX < -0.5
+    locomotion.current.right = localX > 0.5
     locomotion.current.grounded = grounded
     locomotion.current.crouched = crouched.current
-    locomotion.current.sprinting = inAir ? airSpeed.current > MOVE_SPEED + 0.01 : sprinting
+    locomotion.current.sprinting = sprinting
     locomotion.current.aiming = aiming.current
     const speed = inAir ? airSpeed.current : groundSpeed
-    const wishX = moveX * speed
-    const wishZ = moveZ * speed
+    const wishX = inAir ? airWishWorld.current.x * speed : moveX * speed
+    const wishZ = inAir ? airWishWorld.current.z * speed : moveZ * speed
 
     const velocity = rigidBody.linvel()
     const dt = Math.min(delta, 0.05)
@@ -348,22 +340,13 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
         nextX = stopped.x
         nextZ = stopped.z
       }
-    } else {
-      const dYaw = yaw.current - prevYaw.current
-      if (dYaw !== 0) {
-        const turned = rotateYawXZ(nextX, nextZ, dYaw)
-        nextX = turned.x
-        nextZ = turned.z
-      }
-      if (length > 0) {
-        const gained = accelerate(nextX, nextZ, wishX, wishZ, AIR_ACCEL, dt, speed)
-        nextX = gained.x
-        nextZ = gained.z
-      }
+    } else if (airWishWorld.current.x !== 0 || airWishWorld.current.z !== 0) {
+      const gained = accelerate(nextX, nextZ, wishX, wishZ, AIR_ACCEL, dt, speed)
+      nextX = gained.x
+      nextZ = gained.z
     }
     const nextY = jumped ? JUMP_VELOCITY : velocity.y
     rigidBody.setLinvel({ x: nextX, y: nextY, z: nextZ }, true)
-    prevYaw.current = yaw.current
 
     if (aiming.current) {
       visualYaw.current = dampAngle(
