@@ -3,16 +3,24 @@ import { useFrame, useThree } from '@react-three/fiber'
 import { CapsuleCollider, RigidBody, useRapier, type RapierRigidBody } from '@react-three/rapier'
 import { useEffect, useRef } from 'react'
 import { Group, Vector3 } from 'three'
+import { PlayerModel } from './PlayerModel'
 import type { ProjectileSpawn } from './Projectile'
 
 const MOVE_SPEED = 7
 const JUMP_VELOCITY = 7.5
 const CAMERA_DISTANCE = 6.2
+const CAMERA_FOLLOW_LAMBDA = 6
+const VISUAL_TURN_LAMBDA = 7
 const LOOK_HEIGHT = 1.15
 const CAPSULE_RADIUS = 0.4
 const CAPSULE_HALF_HEIGHT = 0.5
 const GROUND_RAY_LENGTH = CAPSULE_HALF_HEIGHT + CAPSULE_RADIUS + 0.12
 const PROJECTILE_SPEED = 38
+
+function dampAngle(current: number, target: number, lambda: number, dt: number) {
+  const delta = Math.atan2(Math.sin(target - current), Math.cos(target - current))
+  return current + delta * (1 - Math.exp(-lambda * dt))
+}
 
 type Controls = {
   forward: boolean
@@ -30,8 +38,10 @@ type PlayerProps = {
 export function Player({ sensitivity, onShoot }: PlayerProps) {
   const body = useRef<RapierRigidBody>(null)
   const visual = useRef<Group>(null)
+  const moving = useRef(false)
   const yaw = useRef(0)
   const pitch = useRef(0.28)
+  const visualYaw = useRef(0)
   const lookAt = useRef(new Vector3())
   const desiredCam = useRef(new Vector3())
   const { gl, camera } = useThree()
@@ -111,6 +121,7 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     }
 
     const length = Math.hypot(moveX, moveZ)
+    moving.current = length > 0
     if (length > 0) {
       moveX = (moveX / length) * MOVE_SPEED
       moveZ = (moveZ / length) * MOVE_SPEED
@@ -120,8 +131,10 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     const nextY = jump && grounded ? JUMP_VELOCITY : velocity.y
     rigidBody.setLinvel({ x: moveX, y: nextY, z: moveZ }, true)
 
+    const targetYaw = length > 0 ? Math.atan2(-moveX, -moveZ) : yaw.current
+    visualYaw.current = dampAngle(visualYaw.current, targetYaw, VISUAL_TURN_LAMBDA, delta)
     if (visual.current) {
-      visual.current.rotation.y = yaw.current
+      visual.current.rotation.y = visualYaw.current
     }
 
     lookAt.current.set(origin.x, origin.y + LOOK_HEIGHT, origin.z)
@@ -131,7 +144,7 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
       origin.y + LOOK_HEIGHT + Math.sin(pitch.current) * CAMERA_DISTANCE,
       origin.z + Math.cos(yaw.current) * cosPitch * CAMERA_DISTANCE,
     )
-    camera.position.lerp(desiredCam.current, 1 - Math.exp(-10 * delta))
+    camera.position.lerp(desiredCam.current, 1 - Math.exp(-CAMERA_FOLLOW_LAMBDA * delta))
     camera.lookAt(lookAt.current)
   })
 
@@ -147,14 +160,7 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     >
       <CapsuleCollider args={[CAPSULE_HALF_HEIGHT, CAPSULE_RADIUS]} mass={1} />
       <group ref={visual}>
-        <mesh castShadow>
-          <capsuleGeometry args={[CAPSULE_RADIUS, CAPSULE_HALF_HEIGHT * 2, 4, 12]} />
-          <meshStandardMaterial color="#5eead4" />
-        </mesh>
-        <mesh position={[0.35, 0.12, -0.58]} rotation={[0.08, 0, 0]} castShadow>
-          <boxGeometry args={[0.12, 0.12, 0.72]} />
-          <meshStandardMaterial color="#1a2332" />
-        </mesh>
+        <PlayerModel moving={moving} />
       </group>
     </RigidBody>
   )
