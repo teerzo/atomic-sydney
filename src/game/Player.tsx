@@ -9,6 +9,10 @@ import type { ProjectileSpawn } from './Projectile'
 const MOVE_SPEED = 7
 const CROUCH_SPEED_SCALE = 0.45
 const JUMP_VELOCITY = 7.5
+const GROUND_ACCEL = 42
+const AIR_ACCEL = 42
+const GROUND_FRICTION = 32
+const GROUND_STOP_SPEED = 1.5
 const CAMERA_DISTANCE = 6.2
 const ADS_DISTANCE = 3.8
 const HIP_FOV = 60
@@ -54,6 +58,43 @@ function dampAngle(current: number, target: number, lambda: number, dt: number, 
   const maxStep = maxSpeed * dt
   const step = Math.max(-maxStep, Math.min(maxStep, delta * (1 - Math.exp(-lambda * dt))))
   return current + step
+}
+
+function accelerate(
+  vx: number,
+  vz: number,
+  wishX: number,
+  wishZ: number,
+  accel: number,
+  dt: number,
+  maxSpeed: number,
+) {
+  const wishSpeed = Math.hypot(wishX, wishZ)
+  if (wishSpeed < 1e-6) return { x: vx, z: vz }
+  const nx = wishX / wishSpeed
+  const nz = wishZ / wishSpeed
+  const along = vx * nx + vz * nz
+  const add = Math.min(maxSpeed - along, accel * dt)
+  if (add <= 0) return { x: vx, z: vz }
+  return { x: vx + nx * add, z: vz + nz * add }
+}
+
+function applyGroundFriction(vx: number, vz: number, dt: number) {
+  const speed = Math.hypot(vx, vz)
+  if (speed < 0.04) return { x: 0, z: 0 }
+  const drop = Math.max(speed, GROUND_STOP_SPEED) * GROUND_FRICTION * dt
+  const next = Math.max(speed - drop, 0)
+  const scale = next / speed
+  return { x: vx * scale, z: vz * scale }
+}
+
+function moveVecToward(vx: number, vz: number, tx: number, tz: number, maxDelta: number) {
+  const dx = tx - vx
+  const dz = tz - vz
+  const dist = Math.hypot(dx, dz)
+  if (dist <= maxDelta || dist < 1e-6) return { x: tx, z: tz }
+  const scale = maxDelta / dist
+  return { x: vx + dx * scale, z: vz + dz * scale }
 }
 
 type Controls = {
@@ -256,14 +297,34 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     locomotion.current.crouched = crouched.current
     locomotion.current.aiming = aiming.current
     const speed = MOVE_SPEED * (crouched.current ? CROUCH_SPEED_SCALE : 1)
+    let wishX = 0
+    let wishZ = 0
     if (length > 0) {
-      moveX = (moveX / length) * speed
-      moveZ = (moveZ / length) * speed
+      wishX = (moveX / length) * speed
+      wishZ = (moveZ / length) * speed
     }
 
     const velocity = rigidBody.linvel()
+    const dt = Math.min(delta, 0.05)
+    let nextX = velocity.x
+    let nextZ = velocity.z
+    if (grounded) {
+      if (length > 0) {
+        const gained = moveVecToward(nextX, nextZ, wishX, wishZ, GROUND_ACCEL * dt)
+        nextX = gained.x
+        nextZ = gained.z
+      } else {
+        const stopped = applyGroundFriction(nextX, nextZ, dt)
+        nextX = stopped.x
+        nextZ = stopped.z
+      }
+    } else if (length > 0) {
+      const gained = accelerate(nextX, nextZ, wishX, wishZ, AIR_ACCEL, dt, speed)
+      nextX = gained.x
+      nextZ = gained.z
+    }
     const nextY = jump && grounded && !crouched.current && !stoodFromJump ? JUMP_VELOCITY : velocity.y
-    rigidBody.setLinvel({ x: moveX, y: nextY, z: moveZ }, true)
+    rigidBody.setLinvel({ x: nextX, y: nextY, z: nextZ }, true)
 
     if (aiming.current) {
       visualYaw.current = dampAngle(
@@ -333,7 +394,8 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
         position={[0, 1.2, 0]}
         colliders={false}
         lockRotations
-        friction={0.8}
+        friction={0}
+        linearDamping={0}
         restitution={0}
         canSleep={false}
       >
