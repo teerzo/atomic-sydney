@@ -3,7 +3,6 @@ import { useFrame, useThree } from '@react-three/fiber'
 import { CapsuleCollider, RigidBody, useRapier, type RapierCollider, type RapierRigidBody } from '@react-three/rapier'
 import { useEffect, useRef } from 'react'
 import { Group, PerspectiveCamera, Vector3 } from 'three'
-import { debugLog } from './debugLog'
 import { PlayerModel, type Locomotion } from './PlayerModel'
 import type { ProjectileSpawn } from './Projectile'
 
@@ -28,7 +27,6 @@ const CAPSULE_RADIUS = 0.4
 const CAPSULE_HALF_HEIGHT = 0.5
 const CROUCH_HALF_HEIGHT = 0.25
 const GROUND_SKIN = 0.1
-const GROUND_NORMAL_MIN_Y = 0.45
 
 function capsuleCenterY(halfHeight: number) {
   return halfHeight + CAPSULE_RADIUS
@@ -75,7 +73,6 @@ type PlayerProps = {
 }
 
 export function Player({ sensitivity, onShoot }: PlayerProps) {
-  const bootLogged = useRef(false)
   const body = useRef<RapierRigidBody>(null)
   const collider = useRef<RapierCollider>(null)
   const visual = useRef<Group>(null)
@@ -110,16 +107,6 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
   const downRay = useRef(new rapier.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: -1, z: 0 })).current
   const upRay = useRef(new rapier.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 1, z: 0 })).current
   const [, get] = useKeyboardControls<keyof Controls>()
-
-  if (!bootLogged.current) {
-    bootLogged.current = true
-    debugLog('C', 'Player.tsx:mount', 'Player hooks initialized', {
-      hasWorld: Boolean(world),
-      hasCastRay: typeof world?.castRay,
-      hasCastRayAndGetNormal: typeof (world as { castRayAndGetNormal?: unknown })?.castRayAndGetNormal,
-      hasRapierRay: typeof rapier?.Ray,
-    })
-  }
 
   useEffect(() => {
     const canvas = gl.domElement
@@ -184,15 +171,10 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
   }, [gl, onShoot, sensitivity])
 
   useFrame((_, delta) => {
-    let step = 'enter'
-    try {
     const rigidBody = body.current
     const capsule = collider.current
-    if (!rigidBody) {
-      if (!bootLogged.current) debugLog('C', 'Player.tsx:useFrame', 'rigidBody missing', { step })
-      return
-    }
-    step = 'origin'
+    if (!rigidBody) return
+
     const origin = rigidBody.translation()
     const { forward, back, left, right, jump, crouch, shoulder: shoulderKey } = get()
     const crouchPressed = crouch && !crouchHeld.current
@@ -228,29 +210,21 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
       stoodFromJump = wasCrouched && !crouched.current
     }
 
-    step = 'capsule-center'
     const halfHeight = currentHalfHeight(crouched.current)
-    const center = capsule?.translation() ?? {
-      x: origin.x,
-      y: origin.y + capsuleCenterY(halfHeight),
-      z: origin.z,
-    }
-    downRay.origin.x = center.x
-    downRay.origin.y = center.y
-    downRay.origin.z = center.z
-    step = 'castRayAndGetNormal'
-    const hit = world.castRayAndGetNormal(
-      downRay,
-      halfHeight + CAPSULE_RADIUS + GROUND_SKIN,
-      true,
-      undefined,
-      undefined,
-      undefined,
-      rigidBody,
-    )
-    step = 'hit.normal'
-    const velocity = rigidBody.linvel()
-    const grounded = hit !== null && hit.normal.y > GROUND_NORMAL_MIN_Y && velocity.y <= 2
+    const centerY = origin.y + capsuleCenterY(halfHeight)
+    downRay.origin.x = origin.x
+    downRay.origin.y = centerY
+    downRay.origin.z = origin.z
+    const grounded =
+      world.castRay(
+        downRay,
+        halfHeight + CAPSULE_RADIUS + GROUND_SKIN,
+        true,
+        undefined,
+        undefined,
+        undefined,
+        rigidBody,
+      ) !== null
 
     const fx = -Math.sin(yaw.current)
     const fz = -Math.cos(yaw.current)
@@ -287,6 +261,7 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
       moveZ = (moveZ / length) * speed
     }
 
+    const velocity = rigidBody.linvel()
     const nextY = jump && grounded && !crouched.current && !stoodFromJump ? JUMP_VELOCITY : velocity.y
     rigidBody.setLinvel({ x: moveX, y: nextY, z: moveZ }, true)
 
@@ -311,7 +286,6 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     locomotion.current.aimPitch = pitch.current
     locomotion.current.aimYawOffset = yaw.current - visualYaw.current
 
-    step = 'sync-visual'
     const pos = rigidBody.translation()
     if (visual.current) {
       visual.current.position.set(pos.x, pos.y + capsuleCenterY(halfHeight), pos.z)
@@ -347,27 +321,9 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
       eyeY + Math.sin(pitch.current) * cameraDistance.current,
       pos.z + Math.cos(yaw.current) * cosPitch * cameraDistance.current + rightZ * lateral,
     )
-    step = 'camera'
     camera.position.lerp(desiredCam.current, 1 - Math.exp(-CAMERA_FOLLOW_LAMBDA * delta))
     camera.lookAt(lookAt.current)
-    if (!(window as unknown as { __playerFrameOk?: boolean }).__playerFrameOk) {
-      ;(window as unknown as { __playerFrameOk?: boolean }).__playerFrameOk = true
-      debugLog('E', 'Player.tsx:useFrame', 'first frame completed', {
-        grounded,
-        crouched: crouched.current,
-        hasVisual: Boolean(visual.current),
-        hasCapsule: Boolean(capsule),
-      })
-    }
-    } catch (error) {
-      debugLog('A', 'Player.tsx:useFrame', `crash at ${step}`, {
-        step,
-        error: String(error),
-        stack: error instanceof Error ? error.stack : undefined,
-      })
-      throw error
-    }
-  }, 0)
+  })
 
   return (
     <>

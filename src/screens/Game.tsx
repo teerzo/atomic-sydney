@@ -4,7 +4,6 @@ import { Physics } from '@react-three/rapier'
 import { Suspense, useCallback, useEffect, useState } from 'react'
 import { Ground } from '../game/Ground'
 import { Obstacles } from '../game/Obstacles'
-import { debugLog } from '../game/debugLog'
 import { Player } from '../game/Player'
 import { Projectile, type ProjectileSpawn } from '../game/Projectile'
 
@@ -45,23 +44,6 @@ export function Game({ sensitivity, onExit }: GameProps) {
   const [debugColliders, setDebugColliders] = useState(false)
 
   useEffect(() => {
-    debugLog('D', 'Game.tsx:mount', 'Game screen mounted')
-    const onError = (event: ErrorEvent) => {
-      debugLog('D', 'Game.tsx:window.error', event.message, {
-        filename: event.filename,
-        lineno: event.lineno,
-        colno: event.colno,
-        stack: event.error instanceof Error ? event.error.stack : undefined,
-      })
-    }
-    const onRejection = (event: PromiseRejectionEvent) => {
-      debugLog('D', 'Game.tsx:unhandledrejection', String(event.reason), {
-        stack: event.reason instanceof Error ? event.reason.stack : undefined,
-      })
-    }
-    window.addEventListener('error', onError)
-    window.addEventListener('unhandledrejection', onRejection)
-
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.repeat) return
       if (event.code === 'Escape') onExit()
@@ -77,8 +59,6 @@ export function Game({ sensitivity, onExit }: GameProps) {
     window.addEventListener('keydown', onKeyDown)
     document.addEventListener('pointerlockchange', onLockChange)
     return () => {
-      window.removeEventListener('error', onError)
-      window.removeEventListener('unhandledrejection', onRejection)
       window.removeEventListener('keydown', onKeyDown)
       document.removeEventListener('pointerlockchange', onLockChange)
     }

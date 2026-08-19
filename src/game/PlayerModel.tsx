@@ -1,7 +1,6 @@
 import { useFrame } from '@react-three/fiber'
 import { useRef, type MutableRefObject, type RefObject } from 'react'
 import { Euler, Group, Matrix4, Quaternion, Vector3 } from 'three'
-import { debugLog } from './debugLog'
 import { PixelPart, maps } from './pixelArt'
 
 const POSE_LAMBDA = 14
@@ -162,7 +161,6 @@ export function PlayerModel({ locomotion, muzzle }: PlayerModelProps) {
   const rightFoot = useRef<Group>(null)
 
   useFrame((state, delta) => {
-    try {
     const { forward, back, left, right, grounded, crouched, aiming, aimPitch, aimYawOffset } =
       locomotion.current
     const walk = (forward ? 1 : 0) - (back ? 1 : 0)
@@ -277,14 +275,7 @@ export function PlayerModel({ locomotion, muzzle }: PlayerModelProps) {
         )
       }
     }
-  } catch (error) {
-    debugLog('B', 'PlayerModel.tsx:useFrame', 'pose crash', {
-      error: String(error),
-      stack: error instanceof Error ? error.stack : undefined,
-    })
-    throw error
-  }
-  }, 1)
+  })
 
   return (
     <group ref={bob}>
