@@ -1,15 +1,8 @@
 import { useFrame } from '@react-three/fiber'
 import { useRef, type MutableRefObject, type RefObject } from 'react'
 import { Euler, Group, Matrix4, Quaternion, Vector3 } from 'three'
+import { PixelPart, maps } from './pixelArt'
 
-const BODY = '#5eead4'
-const LIMB = '#3aa99a'
-const JOINT = '#2e8a7e'
-const HEAD = '#9af0e3'
-const HAND = '#7ed9cb'
-const GUN = '#1b2433'
-const GUN_METAL = '#3d4a5c'
-const GUN_ACCENT = '#5eead4'
 const POSE_LAMBDA = 14
 const GUN_BLEND_LAMBDA = 11
 const UPPER_LEN = 0.24
@@ -117,34 +110,33 @@ function applyTwoBoneIK(
   hand.rotation.set(0.1, 0.15, 0.05)
 }
 
-function Box({
-  size,
-  position,
-  color,
-}: {
-  size: [number, number, number]
-  position: [number, number, number]
-  color: string
-}) {
-  return (
-    <mesh position={position} castShadow>
-      <boxGeometry args={size} />
-      <meshStandardMaterial color={color} roughness={0.45} metalness={0.15} />
-    </mesh>
-  )
-}
-
 function Gun() {
   return (
     <group>
-      <Box size={[0.07, 0.09, 0.28]} position={[0, 0.02, 0.02]} color={GUN} />
-      <Box size={[0.05, 0.07, 0.18]} position={[0, 0.01, 0.22]} color={GUN_METAL} />
-      <Box size={[0.04, 0.05, 0.42]} position={[0, 0.03, -0.28]} color={GUN_METAL} />
-      <Box size={[0.055, 0.055, 0.08]} position={[0, 0.03, -0.52]} color={GUN} />
-      <Box size={[0.06, 0.14, 0.08]} position={[0, -0.08, 0.04]} color={GUN} />
-      <Box size={[0.04, 0.12, 0.05]} position={[0, -0.1, -0.08]} color={GUN_METAL} />
-      <Box size={[0.03, 0.05, 0.03]} position={[0, 0.08, -0.02]} color={GUN_ACCENT} />
-      <Box size={[0.02, 0.04, 0.02]} position={[0, 0.07, -0.38]} color={GUN_ACCENT} />
+      <PixelPart size={[0.07, 0.09, 0.28]} position={[0, 0.02, 0.02]} map={maps.gun} roughness={0.4} metalness={0.45} />
+      <PixelPart size={[0.05, 0.07, 0.18]} position={[0, 0.01, 0.22]} map={maps.gunMetal} roughness={0.35} metalness={0.55} />
+      <PixelPart size={[0.04, 0.05, 0.42]} position={[0, 0.03, -0.28]} map={maps.gunMetal} roughness={0.35} metalness={0.55} />
+      <PixelPart size={[0.055, 0.055, 0.08]} position={[0, 0.03, -0.52]} map={maps.gun} roughness={0.4} metalness={0.45} />
+      <PixelPart size={[0.06, 0.14, 0.08]} position={[0, -0.08, 0.04]} map={maps.gun} roughness={0.4} metalness={0.45} />
+      <PixelPart size={[0.04, 0.12, 0.05]} position={[0, -0.1, -0.08]} map={maps.gunMetal} roughness={0.35} metalness={0.55} />
+      <PixelPart
+        size={[0.03, 0.05, 0.03]}
+        position={[0, 0.08, -0.02]}
+        map={maps.gunAccent}
+        roughness={0.28}
+        metalness={0.2}
+        emissive="#5eead4"
+        emissiveIntensity={0.55}
+      />
+      <PixelPart
+        size={[0.02, 0.04, 0.02]}
+        position={[0, 0.07, -0.38]}
+        map={maps.gunAccent}
+        roughness={0.28}
+        metalness={0.2}
+        emissive="#5eead4"
+        emissiveIntensity={0.55}
+      />
     </group>
   )
 }
@@ -287,8 +279,22 @@ export function PlayerModel({ locomotion, muzzle }: PlayerModelProps) {
 
   return (
     <group ref={bob}>
-      <Box size={[0.32, 0.32, 0.32]} position={[0, 0.62, 0]} color={HEAD} />
-      <Box size={[0.44, 0.5, 0.26]} position={[0, 0.16, 0]} color={BODY} />
+      <PixelPart
+        size={[0.32, 0.32, 0.32]}
+        position={[0, 0.62, 0]}
+        map={maps.head}
+        faces={{ front: maps.headFront, top: maps.headTop }}
+        roughness={0.48}
+        metalness={0.16}
+      />
+      <PixelPart
+        size={[0.44, 0.5, 0.26]}
+        position={[0, 0.16, 0]}
+        map={maps.body}
+        faces={{ front: maps.bodyFront }}
+        roughness={0.5}
+        metalness={0.18}
+      />
 
       <group ref={gun}>
         <Gun />
@@ -298,47 +304,47 @@ export function PlayerModel({ locomotion, muzzle }: PlayerModelProps) {
       </group>
 
       <group ref={leftShoulder} position={[-0.24, 0.36, 0]}>
-        <Box size={[0.12, 0.08, 0.16]} position={[-0.04, 0, 0]} color={JOINT} />
-        <Box size={[0.11, 0.24, 0.11]} position={[0, -0.12, 0]} color={LIMB} />
+        <PixelPart size={[0.12, 0.08, 0.16]} position={[-0.04, 0, 0]} map={maps.joint} roughness={0.5} metalness={0.2} />
+        <PixelPart size={[0.11, 0.24, 0.11]} position={[0, -0.12, 0]} map={maps.limb} roughness={0.52} metalness={0.16} />
         <group ref={leftElbow} position={[0, -0.24, 0]}>
-          <Box size={[0.08, 0.08, 0.08]} position={[0, 0, 0]} color={JOINT} />
-          <Box size={[0.1, 0.22, 0.1]} position={[0, -0.12, 0]} color={LIMB} />
+          <PixelPart size={[0.08, 0.08, 0.08]} position={[0, 0, 0]} map={maps.joint} roughness={0.5} metalness={0.2} />
+          <PixelPart size={[0.1, 0.22, 0.1]} position={[0, -0.12, 0]} map={maps.limb} roughness={0.52} metalness={0.16} />
           <group ref={leftHand} position={[0, -0.24, 0]}>
-            <Box size={[0.08, 0.08, 0.1]} position={[0, -0.03, -0.02]} color={HAND} />
+            <PixelPart size={[0.08, 0.08, 0.1]} position={[0, -0.03, -0.02]} map={maps.hand} roughness={0.55} metalness={0.1} />
           </group>
         </group>
       </group>
 
       <group ref={rightShoulder} position={[0.24, 0.36, 0]}>
-        <Box size={[0.12, 0.08, 0.16]} position={[0.04, 0, 0]} color={JOINT} />
-        <Box size={[0.11, 0.24, 0.11]} position={[0, -0.12, 0]} color={LIMB} />
+        <PixelPart size={[0.12, 0.08, 0.16]} position={[0.04, 0, 0]} map={maps.joint} roughness={0.5} metalness={0.2} />
+        <PixelPart size={[0.11, 0.24, 0.11]} position={[0, -0.12, 0]} map={maps.limb} roughness={0.52} metalness={0.16} />
         <group ref={rightElbow} position={[0, -0.24, 0]}>
-          <Box size={[0.08, 0.08, 0.08]} position={[0, 0, 0]} color={JOINT} />
-          <Box size={[0.1, 0.22, 0.1]} position={[0, -0.12, 0]} color={LIMB} />
+          <PixelPart size={[0.08, 0.08, 0.08]} position={[0, 0, 0]} map={maps.joint} roughness={0.5} metalness={0.2} />
+          <PixelPart size={[0.1, 0.22, 0.1]} position={[0, -0.12, 0]} map={maps.limb} roughness={0.52} metalness={0.16} />
           <group ref={rightHand} position={[0, -0.24, 0]}>
-            <Box size={[0.08, 0.08, 0.1]} position={[0, -0.03, -0.02]} color={HAND} />
+            <PixelPart size={[0.08, 0.08, 0.1]} position={[0, -0.03, -0.02]} map={maps.hand} roughness={0.55} metalness={0.1} />
           </group>
         </group>
       </group>
 
       <group ref={leftThigh} position={[-0.11, -0.16, 0]}>
-        <Box size={[0.16, 0.32, 0.16]} position={[0, -0.16, 0]} color={LIMB} />
+        <PixelPart size={[0.16, 0.32, 0.16]} position={[0, -0.16, 0]} map={maps.limb} roughness={0.52} metalness={0.16} />
         <group ref={leftKnee} position={[0, -0.32, 0]}>
-          <Box size={[0.1, 0.1, 0.1]} position={[0, 0, 0]} color={JOINT} />
-          <Box size={[0.14, 0.3, 0.14]} position={[0, -0.16, 0]} color={LIMB} />
+          <PixelPart size={[0.1, 0.1, 0.1]} position={[0, 0, 0]} map={maps.joint} roughness={0.5} metalness={0.2} />
+          <PixelPart size={[0.14, 0.3, 0.14]} position={[0, -0.16, 0]} map={maps.limb} roughness={0.52} metalness={0.16} />
           <group ref={leftFoot} position={[0, -0.32, 0]}>
-            <Box size={[0.13, 0.07, 0.22]} position={[0, -0.02, -0.06]} color={JOINT} />
+            <PixelPart size={[0.13, 0.07, 0.22]} position={[0, -0.02, -0.06]} map={maps.foot} roughness={0.62} metalness={0.12} />
           </group>
         </group>
       </group>
 
       <group ref={rightThigh} position={[0.11, -0.16, 0]}>
-        <Box size={[0.16, 0.32, 0.16]} position={[0, -0.16, 0]} color={LIMB} />
+        <PixelPart size={[0.16, 0.32, 0.16]} position={[0, -0.16, 0]} map={maps.limb} roughness={0.52} metalness={0.16} />
         <group ref={rightKnee} position={[0, -0.32, 0]}>
-          <Box size={[0.1, 0.1, 0.1]} position={[0, 0, 0]} color={JOINT} />
-          <Box size={[0.14, 0.3, 0.14]} position={[0, -0.16, 0]} color={LIMB} />
+          <PixelPart size={[0.1, 0.1, 0.1]} position={[0, 0, 0]} map={maps.joint} roughness={0.5} metalness={0.2} />
+          <PixelPart size={[0.14, 0.3, 0.14]} position={[0, -0.16, 0]} map={maps.limb} roughness={0.52} metalness={0.16} />
           <group ref={rightFoot} position={[0, -0.32, 0]}>
-            <Box size={[0.13, 0.07, 0.22]} position={[0, -0.02, -0.06]} color={JOINT} />
+            <PixelPart size={[0.13, 0.07, 0.22]} position={[0, -0.02, -0.06]} map={maps.foot} roughness={0.62} metalness={0.12} />
           </group>
         </group>
       </group>

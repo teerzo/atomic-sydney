@@ -1,4 +1,5 @@
 import { RigidBody } from '@react-three/rapier'
+import { maps, usePixelMap } from './pixelArt'
 
 export type ProjectileSpawn = {
   id: number
@@ -12,6 +13,8 @@ type ProjectileProps = {
 }
 
 export function Projectile({ position, velocity }: ProjectileProps) {
+  const map = usePixelMap(maps.bullet)
+
   return (
     <RigidBody
       position={position}
@@ -23,8 +26,16 @@ export function Projectile({ position, velocity }: ProjectileProps) {
       canSleep={false}
     >
       <mesh castShadow>
-        <sphereGeometry args={[0.12, 12, 12]} />
-        <meshStandardMaterial color="#ffe082" emissive="#ffca28" emissiveIntensity={0.85} />
+        <boxGeometry args={[0.14, 0.14, 0.22]} />
+        <meshStandardMaterial
+          map={map}
+          emissiveMap={map}
+          emissive="#ffcc66"
+          emissiveIntensity={1.35}
+          roughness={0.32}
+          metalness={0.08}
+          toneMapped={false}
+        />
       </mesh>
     </RigidBody>
   )

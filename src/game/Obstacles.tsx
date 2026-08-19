@@ -1,4 +1,5 @@
 import { RigidBody } from '@react-three/rapier'
+import { PixelBox, maps } from './pixelArt'
 
 const walls: Array<{ position: [number, number, number]; size: [number, number, number] }> = [
   { position: [0, 1.5, -20], size: [40, 3, 1] },
@@ -27,19 +28,13 @@ export function Obstacles() {
     <>
       {walls.map((wall) => (
         <RigidBody key={wall.position.join(',')} type="fixed" position={wall.position} colliders="cuboid">
-          <mesh castShadow receiveShadow>
-            <boxGeometry args={wall.size} />
-            <meshStandardMaterial color="#4a6270" />
-          </mesh>
+          <PixelBox args={wall.size} map={maps.wall} roughness={0.84} />
         </RigidBody>
       ))}
 
       {pillars.map((position) => (
         <RigidBody key={position.join(',')} type="fixed" position={position} colliders="cuboid">
-          <mesh castShadow receiveShadow>
-            <boxGeometry args={[1.4, 3, 1.4]} />
-            <meshStandardMaterial color="#5b6e7a" />
-          </mesh>
+          <PixelBox args={[1.4, 3, 1.4]} map={maps.pillar} roughness={0.72} metalness={0.18} />
         </RigidBody>
       ))}
 
@@ -52,10 +47,7 @@ export function Obstacles() {
           restitution={0.15}
           friction={0.8}
         >
-          <mesh castShadow receiveShadow>
-            <boxGeometry args={[1, 1, 1]} />
-            <meshStandardMaterial color="#c48a4a" />
-          </mesh>
+          <PixelBox args={[1, 1, 1]} map={maps.crate} roughness={0.88} metalness={0.04} />
         </RigidBody>
       ))}
     </>

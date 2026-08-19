@@ -26,6 +26,16 @@ const CROUCH_LOOK_HEIGHT = 0.7
 const CAPSULE_RADIUS = 0.4
 const CAPSULE_HALF_HEIGHT = 0.5
 const CROUCH_HALF_HEIGHT = 0.25
+
+function capsuleCenterY(halfHeight: number) {
+  return halfHeight + CAPSULE_RADIUS
+}
+
+function applyCapsuleFromFeet(capsule: RapierCollider, halfHeight: number) {
+  capsule.setHalfHeight(halfHeight)
+  capsule.setTranslationWrtParent({ x: 0, y: capsuleCenterY(halfHeight), z: 0 })
+}
+
 const SHOULDER_OFFSET = 0.62
 const SHOULDER_ADS_OFFSET = 0.72
 const SHOULDER_LAMBDA = 10
@@ -161,12 +171,10 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     if (!rigidBody) return
 
     const origin = rigidBody.translation()
-    const halfHeight = crouched.current ? CROUCH_HALF_HEIGHT : CAPSULE_HALF_HEIGHT
-    const groundRayLength = halfHeight + CAPSULE_RADIUS + 0.12
     downRay.origin.x = origin.x
     downRay.origin.y = origin.y
     downRay.origin.z = origin.z
-    const grounded = world.castRay(downRay, groundRayLength, true, undefined, undefined, undefined, rigidBody) !== null
+    const grounded = world.castRay(downRay, 0.16, true, undefined, undefined, undefined, rigidBody) !== null
 
     const { forward, back, left, right, jump, crouch, shoulder: shoulderKey } = get()
     const crouchPressed = crouch && !crouchHeld.current
@@ -177,24 +185,18 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     shoulderHeld.current = shoulderKey
 
     const canStand = () => {
-      const standClearance =
-        CAPSULE_HALF_HEIGHT + CAPSULE_RADIUS + (CAPSULE_HALF_HEIGHT - CROUCH_HALF_HEIGHT) + 0.08
+      const standHeight = 2 * capsuleCenterY(CAPSULE_HALF_HEIGHT) + 0.08
       upRay.origin.x = origin.x
       upRay.origin.y = origin.y
       upRay.origin.z = origin.z
-      return world.castRay(upRay, standClearance, true, undefined, undefined, undefined, rigidBody) === null
+      return world.castRay(upRay, standHeight, true, undefined, undefined, undefined, rigidBody) === null
     }
 
     const setCrouched = (next: boolean) => {
       if (next === crouched.current) return
       if (!next && !canStand()) return
-      const prevHalf = crouched.current ? CROUCH_HALF_HEIGHT : CAPSULE_HALF_HEIGHT
-      const nextHalf = next ? CROUCH_HALF_HEIGHT : CAPSULE_HALF_HEIGHT
       crouched.current = next
-      capsule?.setHalfHeight(nextHalf)
-      const pos = rigidBody.translation()
-      pos.y += nextHalf - prevHalf
-      rigidBody.setTranslation(pos, true)
+      if (capsule) applyCapsuleFromFeet(capsule, next ? CROUCH_HALF_HEIGHT : CAPSULE_HALF_HEIGHT)
     }
 
     if (crouchPressed) {
@@ -271,6 +273,7 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     locomotion.current.aimYawOffset = yaw.current - visualYaw.current
 
     const pos = rigidBody.translation()
+    const halfHeight = crouched.current ? CROUCH_HALF_HEIGHT : CAPSULE_HALF_HEIGHT
     lookHeight.current = damp(
       lookHeight.current,
       crouched.current ? CROUCH_LOOK_HEIGHT : LOOK_HEIGHT,
@@ -293,15 +296,12 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
       shoulderBlend.current * (aiming.current ? SHOULDER_ADS_OFFSET : SHOULDER_OFFSET)
     const rightX = Math.cos(yaw.current)
     const rightZ = -Math.sin(yaw.current)
-    lookAt.current.set(
-      pos.x + rightX * lateral,
-      pos.y + lookHeight.current,
-      pos.z + rightZ * lateral,
-    )
+    const eyeY = pos.y + capsuleCenterY(halfHeight) + lookHeight.current
+    lookAt.current.set(pos.x + rightX * lateral, eyeY, pos.z + rightZ * lateral)
     const cosPitch = Math.cos(pitch.current)
     desiredCam.current.set(
       pos.x + Math.sin(yaw.current) * cosPitch * cameraDistance.current + rightX * lateral,
-      pos.y + lookHeight.current + Math.sin(pitch.current) * cameraDistance.current,
+      eyeY + Math.sin(pitch.current) * cameraDistance.current,
       pos.z + Math.cos(yaw.current) * cosPitch * cameraDistance.current + rightZ * lateral,
     )
     camera.position.lerp(desiredCam.current, 1 - Math.exp(-CAMERA_FOLLOW_LAMBDA * delta))
@@ -311,15 +311,20 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
   return (
     <RigidBody
       ref={body}
-      position={[0, 2, 0]}
+      position={[0, 1.2, 0]}
       colliders={false}
       lockRotations
       friction={0.8}
       restitution={0}
       canSleep={false}
     >
-      <CapsuleCollider ref={collider} args={[CAPSULE_HALF_HEIGHT, CAPSULE_RADIUS]} mass={1} />
-      <group ref={visual}>
+      <CapsuleCollider
+        ref={collider}
+        args={[CAPSULE_HALF_HEIGHT, CAPSULE_RADIUS]}
+        position={[0, capsuleCenterY(CAPSULE_HALF_HEIGHT), 0]}
+        mass={1}
+      />
+      <group ref={visual} position={[0, capsuleCenterY(CAPSULE_HALF_HEIGHT), 0]}>
         <PlayerModel locomotion={locomotion} muzzle={muzzle} />
       </group>
     </RigidBody>
