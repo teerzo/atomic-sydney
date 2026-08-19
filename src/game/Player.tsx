@@ -70,6 +70,8 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     grounded: true,
     crouched: false,
     aiming: false,
+    aimPitch: 0,
+    aimYawOffset: 0,
   })
   const crouched = useRef(false)
   const crouchHeld = useRef(false)
@@ -265,6 +267,8 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     if (visual.current) {
       visual.current.rotation.y = visualYaw.current
     }
+    locomotion.current.aimPitch = pitch.current
+    locomotion.current.aimYawOffset = yaw.current - visualYaw.current
 
     const pos = rigidBody.translation()
     lookHeight.current = damp(
