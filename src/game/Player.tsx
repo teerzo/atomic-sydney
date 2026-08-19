@@ -45,7 +45,7 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     const onMouseMove = (event: MouseEvent) => {
       if (document.pointerLockElement !== canvas) return
       yaw.current -= event.movementX * sensitivity * 0.0022
-      pitch.current = Math.min(0.85, Math.max(-0.55, pitch.current - event.movementY * sensitivity * 0.0022))
+      pitch.current = Math.min(0.85, Math.max(-0.55, pitch.current + event.movementY * sensitivity * 0.0022))
     }
 
     const onMouseDown = (event: MouseEvent) => {
@@ -102,12 +102,12 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
       moveZ -= fz
     }
     if (right) {
-      moveX += fz
-      moveZ -= fx
-    }
-    if (left) {
       moveX -= fz
       moveZ += fx
+    }
+    if (left) {
+      moveX += fz
+      moveZ -= fx
     }
 
     const length = Math.hypot(moveX, moveZ)
