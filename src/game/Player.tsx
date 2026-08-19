@@ -61,6 +61,7 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
   const body = useRef<RapierRigidBody>(null)
   const collider = useRef<RapierCollider>(null)
   const visual = useRef<Group>(null)
+  const muzzle = useRef<Group>(null)
   const locomotion = useRef<Locomotion>({
     forward: false,
     back: false,
@@ -111,18 +112,18 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
         return
       }
 
-      const rigidBody = body.current
-      if (!rigidBody) return
-
-      const origin = rigidBody.translation()
-      const cosPitch = Math.cos(pitch.current)
-      const dirX = -Math.sin(yaw.current) * cosPitch
-      const dirY = Math.sin(pitch.current)
-      const dirZ = -Math.cos(yaw.current) * cosPitch
+      const tip = muzzle.current
+      if (!tip) return
+      const origin = new Vector3()
+      const dir = new Vector3()
+      tip.getWorldPosition(origin)
+      tip.getWorldDirection(dir)
+      if (dir.lengthSq() < 1e-6) return
+      dir.normalize()
 
       onShoot({
-        position: [origin.x + dirX * 1.3, origin.y + 0.35 + dirY * 1.3, origin.z + dirZ * 1.3],
-        velocity: [dirX * PROJECTILE_SPEED, dirY * PROJECTILE_SPEED, dirZ * PROJECTILE_SPEED],
+        position: [origin.x + dir.x * 0.12, origin.y + dir.y * 0.12, origin.z + dir.z * 0.12],
+        velocity: [dir.x * PROJECTILE_SPEED, dir.y * PROJECTILE_SPEED, dir.z * PROJECTILE_SPEED],
       })
     }
 
@@ -315,7 +316,7 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     >
       <CapsuleCollider ref={collider} args={[CAPSULE_HALF_HEIGHT, CAPSULE_RADIUS]} mass={1} />
       <group ref={visual}>
-        <PlayerModel locomotion={locomotion} />
+        <PlayerModel locomotion={locomotion} muzzle={muzzle} />
       </group>
     </RigidBody>
   )
