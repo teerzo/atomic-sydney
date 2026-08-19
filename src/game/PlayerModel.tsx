@@ -19,6 +19,7 @@ export type Locomotion = {
   grounded: boolean
   crouched: boolean
   sprinting: boolean
+  sliding: boolean
   aiming: boolean
   aimPitch: number
   aimYawOffset: number
@@ -162,7 +163,7 @@ export function PlayerModel({ locomotion, muzzle }: PlayerModelProps) {
   const rightFoot = useRef<Group>(null)
 
   useFrame((state, delta) => {
-    const { forward, back, left, right, grounded, crouched, sprinting, aiming, aimPitch, aimYawOffset } =
+    const { forward, back, left, right, grounded, crouched, sprinting, sliding, aiming, aimPitch, aimYawOffset } =
       locomotion.current
     const walk = (forward ? 1 : 0) - (back ? 1 : 0)
     const strafe = (right ? 1 : 0) - (left ? 1 : 0)
@@ -178,6 +179,7 @@ export function PlayerModel({ locomotion, muzzle }: PlayerModelProps) {
     let bobX = 0
     let leanZ = 0
     let hipY = 0
+    let pitchX = 0
 
     let lThigh = { x: squat, y: 0, z: 0 }
     let rThigh = { x: squat, y: 0, z: 0 }
@@ -186,7 +188,18 @@ export function PlayerModel({ locomotion, muzzle }: PlayerModelProps) {
     let lFoot = { x: crouched ? 0.62 : 0.06, y: 0, z: 0 }
     let rFoot = { x: crouched ? 0.62 : 0.06, y: 0, z: 0 }
 
-    if (!grounded) {
+    if (sliding) {
+      bobY = -0.12
+      pitchX = 0.72
+      hipY = 0.08
+      leanZ = -0.12
+      lThigh = { x: 0.85, y: 0.18, z: 0.22 }
+      rThigh = { x: 1.55, y: -0.08, z: -0.12 }
+      lKnee = { x: -2.15, y: 0, z: 0 }
+      rKnee = { x: -0.35, y: 0, z: 0 }
+      lFoot = { x: 0.85, y: 0, z: 0 }
+      rFoot = { x: 0.12, y: 0, z: 0 }
+    } else if (!grounded) {
       lThigh.x = squat + 0.35
       rThigh.x = squat + 0.5
       lKnee.x = kneeSquat - 0.35
@@ -225,6 +238,7 @@ export function PlayerModel({ locomotion, muzzle }: PlayerModelProps) {
     if (bob.current) {
       bob.current.position.y = damp(bob.current.position.y, bobY, POSE_LAMBDA, delta)
       bob.current.position.x = damp(bob.current.position.x, bobX, POSE_LAMBDA, delta)
+      bob.current.rotation.x = damp(bob.current.rotation.x, pitchX, POSE_LAMBDA, delta)
       bob.current.rotation.y = damp(bob.current.rotation.y, hipY, POSE_LAMBDA, delta)
       bob.current.rotation.z = damp(bob.current.rotation.z, leanZ, POSE_LAMBDA, delta)
     }

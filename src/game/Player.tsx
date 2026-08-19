@@ -9,6 +9,7 @@ import type { ProjectileSpawn } from './Projectile'
 const MOVE_SPEED = 7
 const CROUCH_SPEED_SCALE = 0.45
 const SPRINT_SPEED_SCALE = 1.55
+const SLIDE_DECEL = 7.5
 const JUMP_VELOCITY = 7.5
 const GROUND_ACCEL = 42
 const AIR_ACCEL = 42
@@ -138,6 +139,7 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     grounded: true,
     crouched: false,
     sprinting: false,
+    sliding: false,
     aiming: false,
     aimPitch: 0,
     aimYawOffset: 0,
@@ -157,6 +159,9 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
   const airWishWorld = useRef({ x: 0, z: 0 })
   const airLocked = useRef(false)
   const airSpeed = useRef(MOVE_SPEED)
+  const sliding = useRef(false)
+  const slideDir = useRef({ x: 0, z: 0 })
+  const slideSpeed = useRef(MOVE_SPEED)
   const { gl } = useThree()
   const { rapier, world } = useRapier()
   const downRay = useRef(new rapier.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: -1, z: 0 })).current
@@ -239,6 +244,18 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     }
     shoulderHeld.current = shoulderKey
 
+    let localX = 0
+    let localZ = 0
+    if (forward) localZ += 1
+    if (back) localZ -= 1
+    if (right) localX += 1
+    if (left) localX -= 1
+    const localLen = Math.hypot(localX, localZ)
+    if (localLen > 0) {
+      localX /= localLen
+      localZ /= localLen
+    }
+
     const canStand = () => {
       const crouchTop = origin.y + 2 * capsuleCenterY(CROUCH_HALF_HEIGHT)
       const extra = 2 * (CAPSULE_HALF_HEIGHT - CROUCH_HALF_HEIGHT) + 0.08
@@ -255,25 +272,15 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
       if (capsule) applyCapsuleFromFeet(capsule, currentHalfHeight(next))
     }
 
-    if (crouchPressed) {
-      setCrouched(!crouched.current)
-    }
-    let stoodFromJump = false
-    if (jump && crouched.current) {
-      const wasCrouched = crouched.current
-      setCrouched(false)
-      stoodFromJump = wasCrouched && !crouched.current
-    }
-
-    const halfHeight = currentHalfHeight(crouched.current)
-    const centerY = origin.y + capsuleCenterY(halfHeight)
+    const halfHeightProbe = currentHalfHeight(crouched.current)
+    const centerY = origin.y + capsuleCenterY(halfHeightProbe)
     downRay.origin.x = origin.x
     downRay.origin.y = centerY
     downRay.origin.z = origin.z
     const grounded =
       world.castRay(
         downRay,
-        halfHeight + CAPSULE_RADIUS + GROUND_SKIN,
+        halfHeightProbe + CAPSULE_RADIUS + GROUND_SKIN,
         true,
         undefined,
         undefined,
@@ -281,28 +288,63 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
         rigidBody,
       ) !== null
 
-    const jumped = jump && grounded && !crouched.current && !stoodFromJump
-    let localX = 0
-    let localZ = 0
-    if (forward) localZ += 1
-    if (back) localZ -= 1
-    if (right) localX += 1
-    if (left) localX -= 1
-    const localLen = Math.hypot(localX, localZ)
-    if (localLen > 0) {
-      localX /= localLen
-      localZ /= localLen
+    const sprintingNow = sprint && !crouched.current && !sliding.current
+    const velocity = rigidBody.linvel()
+    const horizSpeed = Math.hypot(velocity.x, velocity.z)
+    const crouchSpeed = MOVE_SPEED * CROUCH_SPEED_SCALE
+
+    const startSlide = () => {
+      let dx = 0
+      let dz = 0
+      if (horizSpeed > 0.4) {
+        dx = velocity.x / horizSpeed
+        dz = velocity.z / horizSpeed
+      } else if (localLen > 0) {
+        const launched = worldWishFromCamera(localX, localZ, yaw.current, 1)
+        dx = launched.x
+        dz = launched.z
+      } else {
+        return false
+      }
+      slideDir.current = { x: dx, z: dz }
+      slideSpeed.current = Math.max(horizSpeed, MOVE_SPEED * SPRINT_SPEED_SCALE)
+      sliding.current = true
+      setCrouched(true)
+      return true
     }
 
-    const sprinting = sprint && !crouched.current
+    if (crouchPressed) {
+      if (sliding.current) {
+        sliding.current = false
+        setCrouched(false)
+      } else if (sprintingNow && grounded && startSlide()) {
+        // sprint-crouch slide
+      } else {
+        setCrouched(!crouched.current)
+      }
+    }
+    let stoodFromJump = false
+    if (jump && crouched.current) {
+      const wasCrouched = crouched.current
+      sliding.current = false
+      setCrouched(false)
+      stoodFromJump = wasCrouched && !crouched.current
+    }
+
+    const halfHeight = currentHalfHeight(crouched.current)
+    const jumped = jump && grounded && !crouched.current && !stoodFromJump
+    const sprinting = sprint && !crouched.current && !sliding.current
     const groundSpeed =
       MOVE_SPEED * (crouched.current ? CROUCH_SPEED_SCALE : sprinting ? SPRINT_SPEED_SCALE : 1)
 
     if (jumped || (!grounded && !airLocked.current)) {
       const launched = worldWishFromCamera(localX, localZ, yaw.current, 1)
-      airWishWorld.current = { x: launched.x, z: launched.z }
-      airSpeed.current = groundSpeed
+      airWishWorld.current = sliding.current
+        ? { x: slideDir.current.x, z: slideDir.current.z }
+        : { x: launched.x, z: launched.z }
+      airSpeed.current = sliding.current ? slideSpeed.current : groundSpeed
       airLocked.current = true
+      sliding.current = false
     }
     if (grounded && !jumped) {
       airLocked.current = false
@@ -321,16 +363,24 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     locomotion.current.grounded = grounded
     locomotion.current.crouched = crouched.current
     locomotion.current.sprinting = sprinting
+    locomotion.current.sliding = sliding.current
     locomotion.current.aiming = aiming.current
     const speed = inAir ? airSpeed.current : groundSpeed
     const wishX = inAir ? airWishWorld.current.x * speed : moveX * speed
     const wishZ = inAir ? airWishWorld.current.z * speed : moveZ * speed
 
-    const velocity = rigidBody.linvel()
     const dt = Math.min(delta, 0.05)
     let nextX = velocity.x
     let nextZ = velocity.z
-    if (!inAir) {
+    if (sliding.current && grounded) {
+      slideSpeed.current = Math.max(crouchSpeed, slideSpeed.current - SLIDE_DECEL * dt)
+      nextX = slideDir.current.x * slideSpeed.current
+      nextZ = slideDir.current.z * slideSpeed.current
+      if (slideSpeed.current <= crouchSpeed + 0.08) {
+        sliding.current = false
+        locomotion.current.sliding = false
+      }
+    } else if (!inAir) {
       if (length > 0) {
         const gained = moveVecToward(nextX, nextZ, wishX, wishZ, GROUND_ACCEL * dt)
         nextX = gained.x
@@ -355,6 +405,14 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
         AIM_TURN_LAMBDA,
         delta,
         AIM_TURN_MAX_RAD_PER_SEC,
+      )
+    } else if (sliding.current) {
+      visualYaw.current = dampAngle(
+        visualYaw.current,
+        Math.atan2(-slideDir.current.x, -slideDir.current.z),
+        MOVE_TURN_LAMBDA,
+        delta,
+        MOVE_TURN_MAX_RAD_PER_SEC,
       )
     } else if (length > 0) {
       const moveYaw = Math.atan2(-moveX, -moveZ)
