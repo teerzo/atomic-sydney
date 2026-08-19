@@ -18,6 +18,7 @@ export type Locomotion = {
   right: boolean
   grounded: boolean
   crouched: boolean
+  sprinting: boolean
   aiming: boolean
   aimPitch: number
   aimYawOffset: number
@@ -161,16 +162,16 @@ export function PlayerModel({ locomotion, muzzle }: PlayerModelProps) {
   const rightFoot = useRef<Group>(null)
 
   useFrame((state, delta) => {
-    const { forward, back, left, right, grounded, crouched, aiming, aimPitch, aimYawOffset } =
+    const { forward, back, left, right, grounded, crouched, sprinting, aiming, aimPitch, aimYawOffset } =
       locomotion.current
     const walk = (forward ? 1 : 0) - (back ? 1 : 0)
     const strafe = (right ? 1 : 0) - (left ? 1 : 0)
     const moving = walk !== 0 || strafe !== 0
     const t = state.clock.elapsedTime
-    const step = crouched ? 0.55 : 1
+    const step = crouched ? 0.55 : sprinting ? 1.2 : 1
     const squat = crouched ? 1.15 : 0
     const kneeSquat = crouched ? -1.85 : -0.12
-    const speed = crouched ? 7 : 9
+    const speed = crouched ? 7 : sprinting ? 13 : 9
     const phase = Math.sin(t * speed)
 
     let bobY = crouched ? -0.04 : 0

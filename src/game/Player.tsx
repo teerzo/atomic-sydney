@@ -8,6 +8,7 @@ import type { ProjectileSpawn } from './Projectile'
 
 const MOVE_SPEED = 7
 const CROUCH_SPEED_SCALE = 0.45
+const SPRINT_SPEED_SCALE = 1.55
 const JUMP_VELOCITY = 7.5
 const GROUND_ACCEL = 42
 const AIR_ACCEL = 42
@@ -88,6 +89,20 @@ function applyGroundFriction(vx: number, vz: number, dt: number) {
   return { x: vx * scale, z: vz * scale }
 }
 
+function worldWishFromCamera(localX: number, localZ: number, yaw: number, speed: number) {
+  const fx = -Math.sin(yaw)
+  const fz = -Math.cos(yaw)
+  const rx = Math.cos(yaw)
+  const rz = -Math.sin(yaw)
+  return { x: (rx * localX + fx * localZ) * speed, z: (rz * localX + fz * localZ) * speed }
+}
+
+function rotateYawXZ(x: number, z: number, dYaw: number) {
+  const cos = Math.cos(dYaw)
+  const sin = Math.sin(dYaw)
+  return { x: x * cos + z * sin, z: -x * sin + z * cos }
+}
+
 function moveVecToward(vx: number, vz: number, tx: number, tz: number, maxDelta: number) {
   const dx = tx - vx
   const dz = tz - vz
@@ -103,6 +118,7 @@ type Controls = {
   left: boolean
   right: boolean
   jump: boolean
+  sprint: boolean
   crouch: boolean
   shoulder: boolean
 }
@@ -127,6 +143,7 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     right: false,
     grounded: true,
     crouched: false,
+    sprinting: false,
     aiming: false,
     aimPitch: 0,
     aimYawOffset: 0,
@@ -143,6 +160,10 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
   const yaw = useRef(0)
   const pitch = useRef(0.28)
   const visualYaw = useRef(0)
+  const airWishLocal = useRef({ x: 0, z: 0 })
+  const airLocked = useRef(false)
+  const airSpeed = useRef(MOVE_SPEED)
+  const prevYaw = useRef(0)
   const { gl } = useThree()
   const { rapier, world } = useRapier()
   const downRay = useRef(new rapier.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: -1, z: 0 })).current
@@ -217,7 +238,7 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     if (!rigidBody) return
 
     const origin = rigidBody.translation()
-    const { forward, back, left, right, jump, crouch, shoulder: shoulderKey } = get()
+    const { forward, back, left, right, jump, sprint, crouch, shoulder: shoulderKey } = get()
     const crouchPressed = crouch && !crouchHeld.current
     crouchHeld.current = crouch
     if (shoulderKey && !shoulderHeld.current) {
@@ -267,48 +288,57 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
         rigidBody,
       ) !== null
 
-    const fx = -Math.sin(yaw.current)
-    const fz = -Math.cos(yaw.current)
-    let moveX = 0
-    let moveZ = 0
-    if (forward) {
-      moveX += fx
-      moveZ += fz
-    }
-    if (back) {
-      moveX -= fx
-      moveZ -= fz
-    }
-    if (right) {
-      moveX -= fz
-      moveZ += fx
-    }
-    if (left) {
-      moveX += fz
-      moveZ -= fx
+    const jumped = jump && grounded && !crouched.current && !stoodFromJump
+    let localX = 0
+    let localZ = 0
+    if (forward) localZ += 1
+    if (back) localZ -= 1
+    if (right) localX += 1
+    if (left) localX -= 1
+    const localLen = Math.hypot(localX, localZ)
+    if (localLen > 0) {
+      localX /= localLen
+      localZ /= localLen
     }
 
+    const sprinting = sprint && !crouched.current
+    const groundSpeed =
+      MOVE_SPEED * (crouched.current ? CROUCH_SPEED_SCALE : sprinting ? SPRINT_SPEED_SCALE : 1)
+
+    if (jumped || (!grounded && !airLocked.current)) {
+      airWishLocal.current = { x: localX, z: localZ }
+      airSpeed.current = groundSpeed
+      airLocked.current = true
+    }
+    if (grounded && !jumped) {
+      airLocked.current = false
+    }
+
+    const inAir = !grounded || jumped
+    const wishLocalX = inAir ? airWishLocal.current.x : localX
+    const wishLocalZ = inAir ? airWishLocal.current.z : localZ
+    const move = worldWishFromCamera(wishLocalX, wishLocalZ, yaw.current, 1)
+    const moveX = move.x
+    const moveZ = move.z
     const length = Math.hypot(moveX, moveZ)
-    locomotion.current.forward = forward
-    locomotion.current.back = back
-    locomotion.current.left = left
-    locomotion.current.right = right
+
+    locomotion.current.forward = wishLocalZ > 0.5
+    locomotion.current.back = wishLocalZ < -0.5
+    locomotion.current.left = wishLocalX < -0.5
+    locomotion.current.right = wishLocalX > 0.5
     locomotion.current.grounded = grounded
     locomotion.current.crouched = crouched.current
+    locomotion.current.sprinting = inAir ? airSpeed.current > MOVE_SPEED + 0.01 : sprinting
     locomotion.current.aiming = aiming.current
-    const speed = MOVE_SPEED * (crouched.current ? CROUCH_SPEED_SCALE : 1)
-    let wishX = 0
-    let wishZ = 0
-    if (length > 0) {
-      wishX = (moveX / length) * speed
-      wishZ = (moveZ / length) * speed
-    }
+    const speed = inAir ? airSpeed.current : groundSpeed
+    const wishX = moveX * speed
+    const wishZ = moveZ * speed
 
     const velocity = rigidBody.linvel()
     const dt = Math.min(delta, 0.05)
     let nextX = velocity.x
     let nextZ = velocity.z
-    if (grounded) {
+    if (!inAir) {
       if (length > 0) {
         const gained = moveVecToward(nextX, nextZ, wishX, wishZ, GROUND_ACCEL * dt)
         nextX = gained.x
@@ -318,13 +348,22 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
         nextX = stopped.x
         nextZ = stopped.z
       }
-    } else if (length > 0) {
-      const gained = accelerate(nextX, nextZ, wishX, wishZ, AIR_ACCEL, dt, speed)
-      nextX = gained.x
-      nextZ = gained.z
+    } else {
+      const dYaw = yaw.current - prevYaw.current
+      if (dYaw !== 0) {
+        const turned = rotateYawXZ(nextX, nextZ, dYaw)
+        nextX = turned.x
+        nextZ = turned.z
+      }
+      if (length > 0) {
+        const gained = accelerate(nextX, nextZ, wishX, wishZ, AIR_ACCEL, dt, speed)
+        nextX = gained.x
+        nextZ = gained.z
+      }
     }
-    const nextY = jump && grounded && !crouched.current && !stoodFromJump ? JUMP_VELOCITY : velocity.y
+    const nextY = jumped ? JUMP_VELOCITY : velocity.y
     rigidBody.setLinvel({ x: nextX, y: nextY, z: nextZ }, true)
+    prevYaw.current = yaw.current
 
     if (aiming.current) {
       visualYaw.current = dampAngle(
