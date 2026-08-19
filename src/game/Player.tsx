@@ -1,8 +1,8 @@
-import { useKeyboardControls } from '@react-three/drei'
+import { PerspectiveCamera as CameraView, useKeyboardControls } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import { CapsuleCollider, RigidBody, useRapier, type RapierCollider, type RapierRigidBody } from '@react-three/rapier'
 import { useEffect, useRef } from 'react'
-import { Group, PerspectiveCamera, Vector3 } from 'three'
+import { Group, Mesh, PerspectiveCamera, Vector3 } from 'three'
 import { PlayerModel, type Locomotion } from './PlayerModel'
 import type { ProjectileSpawn } from './Projectile'
 
@@ -14,7 +14,6 @@ const ADS_DISTANCE = 3.8
 const HIP_FOV = 60
 const ADS_FOV = 38
 const ADS_LOOK_SCALE = 0.65
-const CAMERA_FOLLOW_LAMBDA = 6
 const LOOK_HEIGHT_LAMBDA = 8
 const ZOOM_LAMBDA = 8
 const MOVE_TURN_LAMBDA = 32
@@ -75,6 +74,9 @@ type PlayerProps = {
 export function Player({ sensitivity, onShoot }: PlayerProps) {
   const body = useRef<RapierRigidBody>(null)
   const collider = useRef<RapierCollider>(null)
+  const cube = useRef<Mesh>(null)
+  const pitchPivot = useRef<Group>(null)
+  const cam = useRef<PerspectiveCamera>(null)
   const visual = useRef<Group>(null)
   const muzzle = useRef<Group>(null)
   const locomotion = useRef<Locomotion>({
@@ -100,9 +102,7 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
   const yaw = useRef(0)
   const pitch = useRef(0.28)
   const visualYaw = useRef(0)
-  const lookAt = useRef(new Vector3())
-  const desiredCam = useRef(new Vector3())
-  const { gl, camera } = useThree()
+  const { gl } = useThree()
   const { rapier, world } = useRapier()
   const downRay = useRef(new rapier.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: -1, z: 0 })).current
   const upRay = useRef(new rapier.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 1, z: 0 })).current
@@ -287,8 +287,16 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     locomotion.current.aimYawOffset = yaw.current - visualYaw.current
 
     const pos = rigidBody.translation()
-    if (visual.current) {
-      visual.current.position.set(pos.x, pos.y + capsuleCenterY(halfHeight), pos.z)
+    if (cube.current) {
+      cube.current.position.set(pos.x, pos.y, pos.z)
+      cube.current.rotation.y = yaw.current
+    }
+    if (visual.current && cube.current) {
+      visual.current.position.set(
+        cube.current.position.x,
+        cube.current.position.y + capsuleCenterY(halfHeight),
+        cube.current.position.z,
+      )
       visual.current.rotation.y = visualYaw.current
     }
     lookHeight.current = damp(
@@ -304,25 +312,18 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
       delta,
     )
     fov.current = damp(fov.current, aiming.current ? ADS_FOV : HIP_FOV, ZOOM_LAMBDA, delta)
-    if (camera instanceof PerspectiveCamera) {
-      camera.fov = fov.current
-      camera.updateProjectionMatrix()
-    }
     shoulderBlend.current = damp(shoulderBlend.current, shoulder.current, SHOULDER_LAMBDA, delta)
     const lateral =
       shoulderBlend.current * (aiming.current ? SHOULDER_ADS_OFFSET : SHOULDER_OFFSET)
-    const rightX = Math.cos(yaw.current)
-    const rightZ = -Math.sin(yaw.current)
-    const eyeY = pos.y + capsuleCenterY(halfHeight) + lookHeight.current
-    lookAt.current.set(pos.x + rightX * lateral, eyeY, pos.z + rightZ * lateral)
-    const cosPitch = Math.cos(pitch.current)
-    desiredCam.current.set(
-      pos.x + Math.sin(yaw.current) * cosPitch * cameraDistance.current + rightX * lateral,
-      eyeY + Math.sin(pitch.current) * cameraDistance.current,
-      pos.z + Math.cos(yaw.current) * cosPitch * cameraDistance.current + rightZ * lateral,
-    )
-    camera.position.lerp(desiredCam.current, 1 - Math.exp(-CAMERA_FOLLOW_LAMBDA * delta))
-    camera.lookAt(lookAt.current)
+    if (pitchPivot.current) {
+      pitchPivot.current.position.y = capsuleCenterY(halfHeight) + lookHeight.current
+      pitchPivot.current.rotation.x = -pitch.current
+    }
+    if (cam.current) {
+      cam.current.position.set(lateral, 0, cameraDistance.current)
+      cam.current.fov = fov.current
+      cam.current.updateProjectionMatrix()
+    }
   })
 
   return (
@@ -343,6 +344,24 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
           mass={1}
         />
       </RigidBody>
+      <mesh ref={cube} position={[0, 1.2, 0]} visible={false} frustumCulled={false}>
+        <boxGeometry args={[0.2, 0.2, 0.2]} />
+        <meshBasicMaterial />
+        <group
+          ref={pitchPivot}
+          position={[0, capsuleCenterY(CAPSULE_HALF_HEIGHT) + LOOK_HEIGHT, 0]}
+          rotation={[-0.28, 0, 0]}
+        >
+          <CameraView
+            ref={cam}
+            makeDefault
+            fov={HIP_FOV}
+            near={0.08}
+            far={200}
+            position={[SHOULDER_OFFSET, 0, CAMERA_DISTANCE]}
+          />
+        </group>
+      </mesh>
       <group ref={visual} position={[0, 1.2 + capsuleCenterY(CAPSULE_HALF_HEIGHT), 0]}>
         <PlayerModel locomotion={locomotion} muzzle={muzzle} />
       </group>
