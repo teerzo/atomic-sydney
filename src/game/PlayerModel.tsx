@@ -6,31 +6,99 @@ const BODY = '#5eead4'
 const LIMB = '#3aa99a'
 const HEAD = '#9af0e3'
 const GUN = '#1a2332'
+const POSE_LAMBDA = 12
 
-type PlayerModelProps = {
-  moving: MutableRefObject<boolean>
+export type Locomotion = {
+  forward: boolean
+  back: boolean
+  left: boolean
+  right: boolean
+  grounded: boolean
 }
 
-export function PlayerModel({ moving }: PlayerModelProps) {
+type PlayerModelProps = {
+  locomotion: MutableRefObject<Locomotion>
+}
+
+function damp(current: number, target: number, lambda: number, dt: number) {
+  return current + (target - current) * (1 - Math.exp(-lambda * dt))
+}
+
+export function PlayerModel({ locomotion }: PlayerModelProps) {
   const bob = useRef<Group>(null)
   const leftArm = useRef<Group>(null)
   const rightArm = useRef<Group>(null)
+  const leftLeg = useRef<Group>(null)
+  const rightLeg = useRef<Group>(null)
 
-  useFrame((state) => {
+  useFrame((state, delta) => {
+    const { forward, back, left, right, grounded } = locomotion.current
+    const walk = (forward ? 1 : 0) - (back ? 1 : 0)
+    const strafe = (right ? 1 : 0) - (left ? 1 : 0)
+    const moving = walk !== 0 || strafe !== 0
     const t = state.clock.elapsedTime
-    const isMoving = moving.current
-    const speed = isMoving ? 9 : 2.2
-    const amount = isMoving ? 0.05 : 0.038
-    const swing = Math.sin(t * speed) * (isMoving ? 0.42 : 0.1)
+
+    let bobY = 0
+    let bobX = 0
+    let leanZ = 0
+    let leftArmX = 0
+    let rightArmX = 0
+    let leftLegX = 0
+    let rightLegX = 0
+    let leftLegZ = 0
+    let rightLegZ = 0
+
+    if (!grounded) {
+      leftArmX = 0.35
+      rightArmX = 0.18
+      leftLegX = 0.28
+      rightLegX = 0.4
+    } else if (moving) {
+      const phase = Math.sin(t * 9)
+      bobY = Math.abs(phase) * 0.04
+
+      if (walk !== 0) {
+        leftLegX = -phase * 0.55 * walk
+        rightLegX = phase * 0.55 * walk
+        leftArmX = phase * 0.42 * walk
+        rightArmX = -phase * 0.28 * walk
+      }
+
+      if (strafe !== 0) {
+        leanZ = -strafe * 0.14
+        bobX = phase * 0.05 * strafe
+        leftLegZ = phase * 0.5 * strafe
+        rightLegZ = -phase * 0.5 * strafe
+        if (walk === 0) {
+          leftArmX = phase * 0.18
+          rightArmX = -phase * 0.12
+        }
+      }
+    } else {
+      const idle = Math.sin(t * 2.2)
+      bobY = idle * 0.038
+      leftArmX = idle * 0.1
+      rightArmX = -idle * 0.06
+    }
 
     if (bob.current) {
-      bob.current.position.y = Math.sin(t * speed) * amount
+      bob.current.position.y = damp(bob.current.position.y, bobY, POSE_LAMBDA, delta)
+      bob.current.position.x = damp(bob.current.position.x, bobX, POSE_LAMBDA, delta)
+      bob.current.rotation.z = damp(bob.current.rotation.z, leanZ, POSE_LAMBDA, delta)
     }
     if (leftArm.current) {
-      leftArm.current.rotation.x = swing
+      leftArm.current.rotation.x = damp(leftArm.current.rotation.x, leftArmX, POSE_LAMBDA, delta)
     }
     if (rightArm.current) {
-      rightArm.current.rotation.x = -swing * 0.45
+      rightArm.current.rotation.x = damp(rightArm.current.rotation.x, rightArmX, POSE_LAMBDA, delta)
+    }
+    if (leftLeg.current) {
+      leftLeg.current.rotation.x = damp(leftLeg.current.rotation.x, leftLegX, POSE_LAMBDA, delta)
+      leftLeg.current.rotation.z = damp(leftLeg.current.rotation.z, leftLegZ, POSE_LAMBDA, delta)
+    }
+    if (rightLeg.current) {
+      rightLeg.current.rotation.x = damp(rightLeg.current.rotation.x, rightLegX, POSE_LAMBDA, delta)
+      rightLeg.current.rotation.z = damp(rightLeg.current.rotation.z, rightLegZ, POSE_LAMBDA, delta)
     }
   })
 
@@ -64,14 +132,18 @@ export function PlayerModel({ moving }: PlayerModelProps) {
         </mesh>
       </group>
 
-      <mesh position={[-0.12, -0.52, 0]} castShadow>
-        <boxGeometry args={[0.18, 0.62, 0.18]} />
-        <meshStandardMaterial color={LIMB} />
-      </mesh>
-      <mesh position={[0.12, -0.52, 0]} castShadow>
-        <boxGeometry args={[0.18, 0.62, 0.18]} />
-        <meshStandardMaterial color={LIMB} />
-      </mesh>
+      <group ref={leftLeg} position={[-0.12, -0.21, 0]}>
+        <mesh position={[0, -0.31, 0]} castShadow>
+          <boxGeometry args={[0.18, 0.62, 0.18]} />
+          <meshStandardMaterial color={LIMB} />
+        </mesh>
+      </group>
+      <group ref={rightLeg} position={[0.12, -0.21, 0]}>
+        <mesh position={[0, -0.31, 0]} castShadow>
+          <boxGeometry args={[0.18, 0.62, 0.18]} />
+          <meshStandardMaterial color={LIMB} />
+        </mesh>
+      </group>
     </group>
   )
 }

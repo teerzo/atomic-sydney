@@ -3,7 +3,7 @@ import { useFrame, useThree } from '@react-three/fiber'
 import { CapsuleCollider, RigidBody, useRapier, type RapierRigidBody } from '@react-three/rapier'
 import { useEffect, useRef } from 'react'
 import { Group, Vector3 } from 'three'
-import { PlayerModel } from './PlayerModel'
+import { PlayerModel, type Locomotion } from './PlayerModel'
 import type { ProjectileSpawn } from './Projectile'
 
 const MOVE_SPEED = 7
@@ -38,7 +38,13 @@ type PlayerProps = {
 export function Player({ sensitivity, onShoot }: PlayerProps) {
   const body = useRef<RapierRigidBody>(null)
   const visual = useRef<Group>(null)
-  const moving = useRef(false)
+  const locomotion = useRef<Locomotion>({
+    forward: false,
+    back: false,
+    left: false,
+    right: false,
+    grounded: true,
+  })
   const yaw = useRef(0)
   const pitch = useRef(0.28)
   const visualYaw = useRef(0)
@@ -121,7 +127,11 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     }
 
     const length = Math.hypot(moveX, moveZ)
-    moving.current = length > 0
+    locomotion.current.forward = forward
+    locomotion.current.back = back
+    locomotion.current.left = left
+    locomotion.current.right = right
+    locomotion.current.grounded = grounded
     if (length > 0) {
       moveX = (moveX / length) * MOVE_SPEED
       moveZ = (moveZ / length) * MOVE_SPEED
@@ -131,8 +141,7 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     const nextY = jump && grounded ? JUMP_VELOCITY : velocity.y
     rigidBody.setLinvel({ x: moveX, y: nextY, z: moveZ }, true)
 
-    const targetYaw = length > 0 ? Math.atan2(-moveX, -moveZ) : yaw.current
-    visualYaw.current = dampAngle(visualYaw.current, targetYaw, VISUAL_TURN_LAMBDA, delta)
+    visualYaw.current = dampAngle(visualYaw.current, yaw.current, VISUAL_TURN_LAMBDA, delta)
     if (visual.current) {
       visual.current.rotation.y = visualYaw.current
     }
@@ -160,7 +169,7 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     >
       <CapsuleCollider args={[CAPSULE_HALF_HEIGHT, CAPSULE_RADIUS]} mass={1} />
       <group ref={visual}>
-        <PlayerModel moving={moving} />
+        <PlayerModel locomotion={locomotion} />
       </group>
     </RigidBody>
   )
