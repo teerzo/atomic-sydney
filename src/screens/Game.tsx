@@ -41,10 +41,16 @@ function GameWorld({
 export function Game({ sensitivity, onExit }: GameProps) {
   const [shots, setShots] = useState<ProjectileSpawn[]>([])
   const [locked, setLocked] = useState(false)
+  const [debugColliders, setDebugColliders] = useState(false)
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat) return
       if (event.code === 'Escape') onExit()
+      if (event.code === 'F3') {
+        event.preventDefault()
+        setDebugColliders((current) => !current)
+      }
     }
     const onLockChange = () => {
       setLocked(Boolean(document.pointerLockElement))
@@ -75,7 +81,7 @@ export function Game({ sensitivity, onExit }: GameProps) {
         <directionalLight position={[12, 22, 10]} intensity={1.25} castShadow shadow-mapSize-width={2048} shadow-mapSize-height={2048} />
         <KeyboardControls map={controls}>
           <Suspense fallback={null}>
-            <Physics gravity={[0, -9.81, 0]}>
+            <Physics gravity={[0, -9.81, 0]} debug={debugColliders}>
               <GameWorld sensitivity={sensitivity} onShoot={onShoot} />
               {shots.map((shot) => (
                 <Projectile key={shot.id} position={shot.position} velocity={shot.velocity} />
@@ -86,7 +92,7 @@ export function Game({ sensitivity, onExit }: GameProps) {
       </Canvas>
       {locked && <div className="crosshair" />}
       <p className="hud-hint">
-        {locked ? 'WASD move · Mouse look · Click shoot · RMB zoom · X shoulder · Space jump · C crouch · Esc menu' : 'Click to play · Esc menu'}
+        {locked ? 'WASD move · Mouse look · Click shoot · RMB zoom · X shoulder · Space jump · C crouch · F3 colliders · Esc menu' : 'Click to play · Esc menu'}
       </p>
     </div>
   )
