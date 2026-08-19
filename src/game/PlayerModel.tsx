@@ -14,6 +14,7 @@ export type Locomotion = {
   left: boolean
   right: boolean
   grounded: boolean
+  crouched: boolean
 }
 
 type PlayerModelProps = {
@@ -32,53 +33,55 @@ export function PlayerModel({ locomotion }: PlayerModelProps) {
   const rightLeg = useRef<Group>(null)
 
   useFrame((state, delta) => {
-    const { forward, back, left, right, grounded } = locomotion.current
+    const { forward, back, left, right, grounded, crouched } = locomotion.current
     const walk = (forward ? 1 : 0) - (back ? 1 : 0)
     const strafe = (right ? 1 : 0) - (left ? 1 : 0)
     const moving = walk !== 0 || strafe !== 0
     const t = state.clock.elapsedTime
+    const swing = crouched ? 0.55 : 1
+    const squat = crouched ? 0.5 : 0
 
-    let bobY = 0
+    let bobY = crouched ? -0.22 : 0
     let bobX = 0
     let leanZ = 0
     let leftArmX = 0
     let rightArmX = 0
-    let leftLegX = 0
-    let rightLegX = 0
+    let leftLegX = squat
+    let rightLegX = squat
     let leftLegZ = 0
     let rightLegZ = 0
 
     if (!grounded) {
       leftArmX = 0.35
       rightArmX = 0.18
-      leftLegX = 0.28
-      rightLegX = 0.4
+      leftLegX = 0.28 + squat
+      rightLegX = 0.4 + squat
     } else if (moving) {
-      const phase = Math.sin(t * 9)
-      bobY = Math.abs(phase) * 0.04
+      const phase = Math.sin(t * (crouched ? 7 : 9))
+      bobY += Math.abs(phase) * 0.04 * swing
 
       if (walk !== 0) {
-        leftLegX = -phase * 0.55 * walk
-        rightLegX = phase * 0.55 * walk
-        leftArmX = phase * 0.42 * walk
-        rightArmX = -phase * 0.28 * walk
+        leftLegX = squat - phase * 0.55 * walk * swing
+        rightLegX = squat + phase * 0.55 * walk * swing
+        leftArmX = phase * 0.42 * walk * swing
+        rightArmX = -phase * 0.28 * walk * swing
       }
 
       if (strafe !== 0) {
-        leanZ = -strafe * 0.14
-        bobX = phase * 0.05 * strafe
-        leftLegZ = phase * 0.5 * strafe
-        rightLegZ = -phase * 0.5 * strafe
+        leanZ = -strafe * 0.14 * swing
+        bobX = phase * 0.05 * strafe * swing
+        leftLegZ = phase * 0.5 * strafe * swing
+        rightLegZ = -phase * 0.5 * strafe * swing
         if (walk === 0) {
-          leftArmX = phase * 0.18
-          rightArmX = -phase * 0.12
+          leftArmX = phase * 0.18 * swing
+          rightArmX = -phase * 0.12 * swing
         }
       }
     } else {
       const idle = Math.sin(t * 2.2)
-      bobY = idle * 0.038
-      leftArmX = idle * 0.1
-      rightArmX = -idle * 0.06
+      bobY += idle * (crouched ? 0.02 : 0.038)
+      leftArmX = idle * 0.1 * swing
+      rightArmX = -idle * 0.06 * swing
     }
 
     if (bob.current) {

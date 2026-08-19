@@ -1,25 +1,35 @@
 import { useKeyboardControls } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
-import { CapsuleCollider, RigidBody, useRapier, type RapierRigidBody } from '@react-three/rapier'
+import { CapsuleCollider, RigidBody, useRapier, type RapierCollider, type RapierRigidBody } from '@react-three/rapier'
 import { useEffect, useRef } from 'react'
 import { Group, Vector3 } from 'three'
 import { PlayerModel, type Locomotion } from './PlayerModel'
 import type { ProjectileSpawn } from './Projectile'
 
 const MOVE_SPEED = 7
+const CROUCH_SPEED_SCALE = 0.45
 const JUMP_VELOCITY = 7.5
 const CAMERA_DISTANCE = 6.2
 const CAMERA_FOLLOW_LAMBDA = 6
-const VISUAL_TURN_LAMBDA = 7
+const LOOK_HEIGHT_LAMBDA = 8
+const VISUAL_TURN_LAMBDA = 1.8
+const VISUAL_TURN_MAX_RAD_PER_SEC = 2.1
 const LOOK_HEIGHT = 1.15
+const CROUCH_LOOK_HEIGHT = 0.7
 const CAPSULE_RADIUS = 0.4
 const CAPSULE_HALF_HEIGHT = 0.5
-const GROUND_RAY_LENGTH = CAPSULE_HALF_HEIGHT + CAPSULE_RADIUS + 0.12
+const CROUCH_HALF_HEIGHT = 0.25
 const PROJECTILE_SPEED = 38
 
-function dampAngle(current: number, target: number, lambda: number, dt: number) {
+function damp(current: number, target: number, lambda: number, dt: number) {
+  return current + (target - current) * (1 - Math.exp(-lambda * dt))
+}
+
+function dampAngle(current: number, target: number, lambda: number, dt: number, maxSpeed: number) {
   const delta = Math.atan2(Math.sin(target - current), Math.cos(target - current))
-  return current + delta * (1 - Math.exp(-lambda * dt))
+  const maxStep = maxSpeed * dt
+  const step = Math.max(-maxStep, Math.min(maxStep, delta * (1 - Math.exp(-lambda * dt))))
+  return current + step
 }
 
 type Controls = {
@@ -28,6 +38,7 @@ type Controls = {
   left: boolean
   right: boolean
   jump: boolean
+  crouch: boolean
 }
 
 type PlayerProps = {
@@ -37,6 +48,7 @@ type PlayerProps = {
 
 export function Player({ sensitivity, onShoot }: PlayerProps) {
   const body = useRef<RapierRigidBody>(null)
+  const collider = useRef<RapierCollider>(null)
   const visual = useRef<Group>(null)
   const locomotion = useRef<Locomotion>({
     forward: false,
@@ -44,7 +56,11 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     left: false,
     right: false,
     grounded: true,
+    crouched: false,
   })
+  const crouched = useRef(false)
+  const crouchHeld = useRef(false)
+  const lookHeight = useRef(LOOK_HEIGHT)
   const yaw = useRef(0)
   const pitch = useRef(0.28)
   const visualYaw = useRef(0)
@@ -52,7 +68,8 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
   const desiredCam = useRef(new Vector3())
   const { gl, camera } = useThree()
   const { rapier, world } = useRapier()
-  const ray = useRef(new rapier.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: -1, z: 0 })).current
+  const downRay = useRef(new rapier.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: -1, z: 0 })).current
+  const upRay = useRef(new rapier.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 1, z: 0 })).current
   const [, get] = useKeyboardControls<keyof Controls>()
 
   useEffect(() => {
@@ -96,15 +113,52 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
 
   useFrame((_, delta) => {
     const rigidBody = body.current
+    const capsule = collider.current
     if (!rigidBody) return
 
     const origin = rigidBody.translation()
-    ray.origin.x = origin.x
-    ray.origin.y = origin.y
-    ray.origin.z = origin.z
-    const grounded = world.castRay(ray, GROUND_RAY_LENGTH, true, undefined, undefined, undefined, rigidBody) !== null
+    const halfHeight = crouched.current ? CROUCH_HALF_HEIGHT : CAPSULE_HALF_HEIGHT
+    const groundRayLength = halfHeight + CAPSULE_RADIUS + 0.12
+    downRay.origin.x = origin.x
+    downRay.origin.y = origin.y
+    downRay.origin.z = origin.z
+    const grounded = world.castRay(downRay, groundRayLength, true, undefined, undefined, undefined, rigidBody) !== null
 
-    const { forward, back, left, right, jump } = get()
+    const { forward, back, left, right, jump, crouch } = get()
+    const crouchPressed = crouch && !crouchHeld.current
+    crouchHeld.current = crouch
+
+    const canStand = () => {
+      const standClearance =
+        CAPSULE_HALF_HEIGHT + CAPSULE_RADIUS + (CAPSULE_HALF_HEIGHT - CROUCH_HALF_HEIGHT) + 0.08
+      upRay.origin.x = origin.x
+      upRay.origin.y = origin.y
+      upRay.origin.z = origin.z
+      return world.castRay(upRay, standClearance, true, undefined, undefined, undefined, rigidBody) === null
+    }
+
+    const setCrouched = (next: boolean) => {
+      if (next === crouched.current) return
+      if (!next && !canStand()) return
+      const prevHalf = crouched.current ? CROUCH_HALF_HEIGHT : CAPSULE_HALF_HEIGHT
+      const nextHalf = next ? CROUCH_HALF_HEIGHT : CAPSULE_HALF_HEIGHT
+      crouched.current = next
+      capsule?.setHalfHeight(nextHalf)
+      const pos = rigidBody.translation()
+      pos.y += nextHalf - prevHalf
+      rigidBody.setTranslation(pos, true)
+    }
+
+    if (crouchPressed) {
+      setCrouched(!crouched.current)
+    }
+    let stoodFromJump = false
+    if (jump && crouched.current) {
+      const wasCrouched = crouched.current
+      setCrouched(false)
+      stoodFromJump = wasCrouched && !crouched.current
+    }
+
     const fx = -Math.sin(yaw.current)
     const fz = -Math.cos(yaw.current)
     let moveX = 0
@@ -132,26 +186,41 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     locomotion.current.left = left
     locomotion.current.right = right
     locomotion.current.grounded = grounded
+    locomotion.current.crouched = crouched.current
+    const speed = MOVE_SPEED * (crouched.current ? CROUCH_SPEED_SCALE : 1)
     if (length > 0) {
-      moveX = (moveX / length) * MOVE_SPEED
-      moveZ = (moveZ / length) * MOVE_SPEED
+      moveX = (moveX / length) * speed
+      moveZ = (moveZ / length) * speed
     }
 
     const velocity = rigidBody.linvel()
-    const nextY = jump && grounded ? JUMP_VELOCITY : velocity.y
+    const nextY = jump && grounded && !crouched.current && !stoodFromJump ? JUMP_VELOCITY : velocity.y
     rigidBody.setLinvel({ x: moveX, y: nextY, z: moveZ }, true)
 
-    visualYaw.current = dampAngle(visualYaw.current, yaw.current, VISUAL_TURN_LAMBDA, delta)
+    visualYaw.current = dampAngle(
+      visualYaw.current,
+      yaw.current,
+      VISUAL_TURN_LAMBDA,
+      delta,
+      VISUAL_TURN_MAX_RAD_PER_SEC,
+    )
     if (visual.current) {
       visual.current.rotation.y = visualYaw.current
     }
 
-    lookAt.current.set(origin.x, origin.y + LOOK_HEIGHT, origin.z)
+    const pos = rigidBody.translation()
+    lookHeight.current = damp(
+      lookHeight.current,
+      crouched.current ? CROUCH_LOOK_HEIGHT : LOOK_HEIGHT,
+      LOOK_HEIGHT_LAMBDA,
+      delta,
+    )
+    lookAt.current.set(pos.x, pos.y + lookHeight.current, pos.z)
     const cosPitch = Math.cos(pitch.current)
     desiredCam.current.set(
-      origin.x + Math.sin(yaw.current) * cosPitch * CAMERA_DISTANCE,
-      origin.y + LOOK_HEIGHT + Math.sin(pitch.current) * CAMERA_DISTANCE,
-      origin.z + Math.cos(yaw.current) * cosPitch * CAMERA_DISTANCE,
+      pos.x + Math.sin(yaw.current) * cosPitch * CAMERA_DISTANCE,
+      pos.y + lookHeight.current + Math.sin(pitch.current) * CAMERA_DISTANCE,
+      pos.z + Math.cos(yaw.current) * cosPitch * CAMERA_DISTANCE,
     )
     camera.position.lerp(desiredCam.current, 1 - Math.exp(-CAMERA_FOLLOW_LAMBDA * delta))
     camera.lookAt(lookAt.current)
@@ -167,7 +236,7 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
       restitution={0}
       canSleep={false}
     >
-      <CapsuleCollider args={[CAPSULE_HALF_HEIGHT, CAPSULE_RADIUS]} mass={1} />
+      <CapsuleCollider ref={collider} args={[CAPSULE_HALF_HEIGHT, CAPSULE_RADIUS]} mass={1} />
       <group ref={visual}>
         <PlayerModel locomotion={locomotion} />
       </group>

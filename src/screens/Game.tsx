@@ -13,6 +13,7 @@ const controls = [
   { name: 'left', keys: ['KeyA', 'ArrowLeft'] },
   { name: 'right', keys: ['KeyD', 'ArrowRight'] },
   { name: 'jump', keys: ['Space'] },
+  { name: 'crouch', keys: ['KeyC'] },
 ]
 
 type GameProps = {
@@ -84,7 +85,7 @@ export function Game({ sensitivity, onExit }: GameProps) {
       </Canvas>
       {locked && <div className="crosshair" />}
       <p className="hud-hint">
-        {locked ? 'WASD move · Mouse look · Click shoot · Space jump · Esc menu' : 'Click to play · Esc menu'}
+        {locked ? 'WASD move · Mouse look · Click shoot · Space jump · C crouch · Esc menu' : 'Click to play · Esc menu'}
       </p>
     </div>
   )
