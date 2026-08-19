@@ -172,10 +172,10 @@ export function PlayerModel({ locomotion, muzzle }: PlayerModelProps) {
     let hipY = 0
 
     let rShoulder = aiming
-      ? { x: 1.28, y: -0.08, z: 0.14 }
-      : { x: 1.08, y: -0.16, z: 0.3 }
-    let rElbow = aiming ? { x: -0.88, y: 0, z: 0 } : { x: -1.18, y: 0, z: 0.06 }
-    let rHand = aiming ? { x: 0.04, y: 0.02, z: 0 } : { x: 0.16, y: 0.06, z: 0 }
+      ? { x: 0.55, y: 0.05, z: 1.05 }
+      : { x: 0.18, y: 0.04, z: 0.12 }
+    let rElbow = aiming ? { x: 0.12, y: 0.08, z: 1.58 } : { x: 0.2, y: 0.05, z: 1.42 }
+    let rHand = aiming ? { x: 0.05, y: -0.35, z: 0.08 } : { x: 0.1, y: -0.2, z: 0.05 }
     let lThigh = { x: squat, y: 0, z: 0 }
     let rThigh = { x: squat, y: 0, z: 0 }
     let lKnee = { x: kneeSquat, y: 0, z: 0 }
@@ -190,7 +190,8 @@ export function PlayerModel({ locomotion, muzzle }: PlayerModelProps) {
       rKnee.x = kneeSquat - 0.45
       lFoot.x = 0.25
       rFoot.x = 0.3
-      rShoulder.x += 0.08
+      rShoulder.x += 0.06
+      rElbow.z += 0.08
     } else if (moving) {
       bobY += Math.abs(phase) * 0.035 * step
       hipY = phase * 0.08 * step
@@ -216,11 +217,12 @@ export function PlayerModel({ locomotion, muzzle }: PlayerModelProps) {
       rKnee.x = kneeSquat - Math.max(0, -rightSwing) * 0.85 - Math.max(0, rightSwing) * 0.2
       lFoot.x = crouched ? 0.28 : 0.06 + Math.max(0, leftSwing) * 0.2
       rFoot.x = crouched ? 0.28 : 0.06 + Math.max(0, rightSwing) * 0.2
-      rShoulder.z += phase * 0.03
-      rElbow.x += idle * 0.02
+      rShoulder.z += 0.05 + phase * 0.04
+      rElbow.z += idle * 0.03
     } else {
       bobY += idle * (crouched ? 0.018 : 0.032)
-      rShoulder.x += idle * 0.025
+      rShoulder.z += idle * 0.03
+      rElbow.z += idle * 0.02
     }
 
     if (bob.current) {
