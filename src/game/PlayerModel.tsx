@@ -15,6 +15,7 @@ export type Locomotion = {
   right: boolean
   grounded: boolean
   crouched: boolean
+  aiming: boolean
 }
 
 type PlayerModelProps = {
@@ -33,12 +34,12 @@ export function PlayerModel({ locomotion }: PlayerModelProps) {
   const rightLeg = useRef<Group>(null)
 
   useFrame((state, delta) => {
-    const { forward, back, left, right, grounded, crouched } = locomotion.current
+    const { forward, back, left, right, grounded, crouched, aiming } = locomotion.current
     const walk = (forward ? 1 : 0) - (back ? 1 : 0)
     const strafe = (right ? 1 : 0) - (left ? 1 : 0)
     const moving = walk !== 0 || strafe !== 0
     const t = state.clock.elapsedTime
-    const swing = crouched ? 0.55 : 1
+    const swing = (crouched ? 0.55 : 1) * (aiming ? 0.7 : 1)
     const squat = crouched ? 0.5 : 0
 
     let bobY = crouched ? -0.22 : 0
@@ -56,7 +57,7 @@ export function PlayerModel({ locomotion }: PlayerModelProps) {
       rightArmX = 0.18
       leftLegX = 0.28 + squat
       rightLegX = 0.4 + squat
-    } else if (moving) {
+    } else if (moving && aiming) {
       const phase = Math.sin(t * (crouched ? 7 : 9))
       bobY += Math.abs(phase) * 0.04 * swing
 
@@ -77,6 +78,13 @@ export function PlayerModel({ locomotion }: PlayerModelProps) {
           rightArmX = -phase * 0.12 * swing
         }
       }
+    } else if (moving) {
+      const phase = Math.sin(t * (crouched ? 7 : 9))
+      bobY += Math.abs(phase) * 0.04 * swing
+      leftLegX = squat - phase * 0.55 * swing
+      rightLegX = squat + phase * 0.55 * swing
+      leftArmX = phase * 0.42 * swing
+      rightArmX = -phase * 0.28 * swing
     } else {
       const idle = Math.sin(t * 2.2)
       bobY += idle * (crouched ? 0.02 : 0.038)

@@ -2,7 +2,7 @@ import { useKeyboardControls } from '@react-three/drei'
 import { useFrame, useThree } from '@react-three/fiber'
 import { CapsuleCollider, RigidBody, useRapier, type RapierCollider, type RapierRigidBody } from '@react-three/rapier'
 import { useEffect, useRef } from 'react'
-import { Group, Vector3 } from 'three'
+import { Group, PerspectiveCamera, Vector3 } from 'three'
 import { PlayerModel, type Locomotion } from './PlayerModel'
 import type { ProjectileSpawn } from './Projectile'
 
@@ -10,8 +10,13 @@ const MOVE_SPEED = 7
 const CROUCH_SPEED_SCALE = 0.45
 const JUMP_VELOCITY = 7.5
 const CAMERA_DISTANCE = 6.2
+const ADS_DISTANCE = 3.8
+const HIP_FOV = 60
+const ADS_FOV = 38
+const ADS_LOOK_SCALE = 0.65
 const CAMERA_FOLLOW_LAMBDA = 6
 const LOOK_HEIGHT_LAMBDA = 8
+const ZOOM_LAMBDA = 8
 const VISUAL_TURN_LAMBDA = 1.8
 const VISUAL_TURN_MAX_RAD_PER_SEC = 2.1
 const LOOK_HEIGHT = 1.15
@@ -19,6 +24,9 @@ const CROUCH_LOOK_HEIGHT = 0.7
 const CAPSULE_RADIUS = 0.4
 const CAPSULE_HALF_HEIGHT = 0.5
 const CROUCH_HALF_HEIGHT = 0.25
+const SHOULDER_OFFSET = 0.62
+const SHOULDER_ADS_OFFSET = 0.72
+const SHOULDER_LAMBDA = 10
 const PROJECTILE_SPEED = 38
 
 function damp(current: number, target: number, lambda: number, dt: number) {
@@ -39,6 +47,7 @@ type Controls = {
   right: boolean
   jump: boolean
   crouch: boolean
+  shoulder: boolean
 }
 
 type PlayerProps = {
@@ -57,10 +66,17 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     right: false,
     grounded: true,
     crouched: false,
+    aiming: false,
   })
   const crouched = useRef(false)
   const crouchHeld = useRef(false)
+  const aiming = useRef(false)
+  const shoulder = useRef(1)
+  const shoulderHeld = useRef(false)
+  const shoulderBlend = useRef(1)
   const lookHeight = useRef(LOOK_HEIGHT)
+  const cameraDistance = useRef(CAMERA_DISTANCE)
+  const fov = useRef(HIP_FOV)
   const yaw = useRef(0)
   const pitch = useRef(0.28)
   const visualYaw = useRef(0)
@@ -77,11 +93,16 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
 
     const onMouseMove = (event: MouseEvent) => {
       if (document.pointerLockElement !== canvas) return
-      yaw.current -= event.movementX * sensitivity * 0.0022
-      pitch.current = Math.min(0.85, Math.max(-0.55, pitch.current + event.movementY * sensitivity * 0.0022))
+      const lookScale = aiming.current ? ADS_LOOK_SCALE : 1
+      yaw.current -= event.movementX * sensitivity * 0.0022 * lookScale
+      pitch.current = Math.min(0.85, Math.max(-0.55, pitch.current + event.movementY * sensitivity * 0.0022 * lookScale))
     }
 
     const onMouseDown = (event: MouseEvent) => {
+      if (event.button === 2) {
+        if (document.pointerLockElement === canvas) aiming.current = true
+        return
+      }
       if (event.button !== 0) return
       if (document.pointerLockElement !== canvas) {
         void canvas.requestPointerLock()
@@ -103,11 +124,29 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
       })
     }
 
+    const onMouseUp = (event: MouseEvent) => {
+      if (event.button === 2) aiming.current = false
+    }
+
+    const onContextMenu = (event: Event) => {
+      event.preventDefault()
+    }
+
+    const onPointerLockChange = () => {
+      if (document.pointerLockElement !== canvas) aiming.current = false
+    }
+
     canvas.addEventListener('mousedown', onMouseDown)
+    window.addEventListener('mouseup', onMouseUp)
+    canvas.addEventListener('contextmenu', onContextMenu)
     document.addEventListener('mousemove', onMouseMove)
+    document.addEventListener('pointerlockchange', onPointerLockChange)
     return () => {
       canvas.removeEventListener('mousedown', onMouseDown)
+      window.removeEventListener('mouseup', onMouseUp)
+      canvas.removeEventListener('contextmenu', onContextMenu)
       document.removeEventListener('mousemove', onMouseMove)
+      document.removeEventListener('pointerlockchange', onPointerLockChange)
     }
   }, [gl, onShoot, sensitivity])
 
@@ -124,9 +163,13 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     downRay.origin.z = origin.z
     const grounded = world.castRay(downRay, groundRayLength, true, undefined, undefined, undefined, rigidBody) !== null
 
-    const { forward, back, left, right, jump, crouch } = get()
+    const { forward, back, left, right, jump, crouch, shoulder: shoulderKey } = get()
     const crouchPressed = crouch && !crouchHeld.current
     crouchHeld.current = crouch
+    if (shoulderKey && !shoulderHeld.current) {
+      shoulder.current *= -1
+    }
+    shoulderHeld.current = shoulderKey
 
     const canStand = () => {
       const standClearance =
@@ -187,6 +230,7 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     locomotion.current.right = right
     locomotion.current.grounded = grounded
     locomotion.current.crouched = crouched.current
+    locomotion.current.aiming = aiming.current
     const speed = MOVE_SPEED * (crouched.current ? CROUCH_SPEED_SCALE : 1)
     if (length > 0) {
       moveX = (moveX / length) * speed
@@ -197,13 +241,18 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
     const nextY = jump && grounded && !crouched.current && !stoodFromJump ? JUMP_VELOCITY : velocity.y
     rigidBody.setLinvel({ x: moveX, y: nextY, z: moveZ }, true)
 
-    visualYaw.current = dampAngle(
-      visualYaw.current,
-      yaw.current,
-      VISUAL_TURN_LAMBDA,
-      delta,
-      VISUAL_TURN_MAX_RAD_PER_SEC,
-    )
+    if (aiming.current) {
+      visualYaw.current = yaw.current
+    } else if (length > 0) {
+      const moveYaw = Math.atan2(-moveX, -moveZ)
+      visualYaw.current = dampAngle(
+        visualYaw.current,
+        moveYaw,
+        VISUAL_TURN_LAMBDA,
+        delta,
+        VISUAL_TURN_MAX_RAD_PER_SEC,
+      )
+    }
     if (visual.current) {
       visual.current.rotation.y = visualYaw.current
     }
@@ -215,12 +264,32 @@ export function Player({ sensitivity, onShoot }: PlayerProps) {
       LOOK_HEIGHT_LAMBDA,
       delta,
     )
-    lookAt.current.set(pos.x, pos.y + lookHeight.current, pos.z)
+    cameraDistance.current = damp(
+      cameraDistance.current,
+      aiming.current ? ADS_DISTANCE : CAMERA_DISTANCE,
+      ZOOM_LAMBDA,
+      delta,
+    )
+    fov.current = damp(fov.current, aiming.current ? ADS_FOV : HIP_FOV, ZOOM_LAMBDA, delta)
+    if (camera instanceof PerspectiveCamera) {
+      camera.fov = fov.current
+      camera.updateProjectionMatrix()
+    }
+    shoulderBlend.current = damp(shoulderBlend.current, shoulder.current, SHOULDER_LAMBDA, delta)
+    const lateral =
+      shoulderBlend.current * (aiming.current ? SHOULDER_ADS_OFFSET : SHOULDER_OFFSET)
+    const rightX = Math.cos(yaw.current)
+    const rightZ = -Math.sin(yaw.current)
+    lookAt.current.set(
+      pos.x + rightX * lateral,
+      pos.y + lookHeight.current,
+      pos.z + rightZ * lateral,
+    )
     const cosPitch = Math.cos(pitch.current)
     desiredCam.current.set(
-      pos.x + Math.sin(yaw.current) * cosPitch * CAMERA_DISTANCE,
-      pos.y + lookHeight.current + Math.sin(pitch.current) * CAMERA_DISTANCE,
-      pos.z + Math.cos(yaw.current) * cosPitch * CAMERA_DISTANCE,
+      pos.x + Math.sin(yaw.current) * cosPitch * cameraDistance.current + rightX * lateral,
+      pos.y + lookHeight.current + Math.sin(pitch.current) * cameraDistance.current,
+      pos.z + Math.cos(yaw.current) * cosPitch * cameraDistance.current + rightZ * lateral,
     )
     camera.position.lerp(desiredCam.current, 1 - Math.exp(-CAMERA_FOLLOW_LAMBDA * delta))
     camera.lookAt(lookAt.current)
