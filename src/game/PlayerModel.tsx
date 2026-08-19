@@ -1,6 +1,6 @@
 import { useFrame } from '@react-three/fiber'
 import { useRef, type MutableRefObject, type RefObject } from 'react'
-import type { Group } from 'three'
+import { Group, Matrix4, Quaternion, Vector3 } from 'three'
 
 const BODY = '#5eead4'
 const LIMB = '#3aa99a'
@@ -11,6 +11,8 @@ const GUN = '#1b2433'
 const GUN_METAL = '#3d4a5c'
 const GUN_ACCENT = '#5eead4'
 const POSE_LAMBDA = 14
+const UPPER_LEN = 0.24
+const LOWER_LEN = 0.24
 
 export type Locomotion = {
   forward: boolean
@@ -27,6 +29,17 @@ type PlayerModelProps = {
   muzzle: RefObject<Group | null>
 }
 
+const _down = new Vector3(0, -1, 0)
+const _shoulderPos = new Vector3()
+const _target = new Vector3()
+const _pole = new Vector3()
+const _toTarget = new Vector3()
+const _dir = new Vector3()
+const _axis = new Vector3()
+const _localDir = new Vector3()
+const _q = new Quaternion()
+const _inv = new Matrix4()
+
 function damp(current: number, target: number, lambda: number, dt: number) {
   return current + (target - current) * (1 - Math.exp(-lambda * dt))
 }
@@ -36,6 +49,60 @@ function dampEuler(group: Group | null, x: number, y: number, z: number, lambda:
   group.rotation.x = damp(group.rotation.x, x, lambda, dt)
   group.rotation.y = damp(group.rotation.y, y, lambda, dt)
   group.rotation.z = damp(group.rotation.z, z, lambda, dt)
+}
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value))
+}
+
+function applyTwoBoneIK(
+  shoulder: Group,
+  elbow: Group,
+  hand: Group,
+  target: Vector3,
+  pole: Vector3,
+  dt: number,
+) {
+  const parent = shoulder.parent
+  if (!parent) return
+
+  parent.updateWorldMatrix(true, false)
+  shoulder.getWorldPosition(_shoulderPos)
+  _toTarget.copy(target).sub(_shoulderPos)
+  const dist = clamp(_toTarget.length(), 0.04, UPPER_LEN + LOWER_LEN - 0.02)
+
+  const cosElbow = clamp(
+    (UPPER_LEN * UPPER_LEN + LOWER_LEN * LOWER_LEN - dist * dist) / (2 * UPPER_LEN * LOWER_LEN),
+    -1,
+    1,
+  )
+  const elbowBend = Math.PI - Math.acos(cosElbow)
+
+  const cosShoulder = clamp(
+    (UPPER_LEN * UPPER_LEN + dist * dist - LOWER_LEN * LOWER_LEN) / (2 * UPPER_LEN * dist),
+    -1,
+    1,
+  )
+  const lift = Math.acos(cosShoulder)
+
+  _dir.copy(_toTarget).normalize()
+  _axis.copy(pole).sub(_shoulderPos).cross(_toTarget)
+  if (_axis.lengthSq() < 1e-8) {
+    _axis.set(1, 0, 0)
+  } else {
+    _axis.normalize()
+  }
+  _dir.applyAxisAngle(_axis, lift)
+
+  _inv.copy(parent.matrixWorld).invert()
+  _localDir.copy(_dir).transformDirection(_inv).normalize()
+  _q.setFromUnitVectors(_down, _localDir)
+  shoulder.quaternion.slerp(_q, 1 - Math.exp(-POSE_LAMBDA * dt))
+
+  elbow.rotation.y = 0
+  elbow.rotation.z = 0
+  elbow.rotation.x = damp(elbow.rotation.x, elbowBend, POSE_LAMBDA, dt)
+  hand.rotation.set(0.1, 0.15, 0.05)
 }
 
 function Box({
@@ -78,6 +145,7 @@ export function PlayerModel({ locomotion, muzzle }: PlayerModelProps) {
   const rightShoulder = useRef<Group>(null)
   const rightElbow = useRef<Group>(null)
   const rightHand = useRef<Group>(null)
+  const grip = useRef<Group>(null)
   const leftThigh = useRef<Group>(null)
   const leftKnee = useRef<Group>(null)
   const leftFoot = useRef<Group>(null)
@@ -92,8 +160,8 @@ export function PlayerModel({ locomotion, muzzle }: PlayerModelProps) {
     const moving = walk !== 0 || strafe !== 0
     const t = state.clock.elapsedTime
     const step = crouched ? 0.55 : 1
-    const squat = crouched ? 0.55 : 0
-    const kneeSquat = crouched ? 0.85 : 0.12
+    const squat = crouched ? 0.7 : 0
+    const kneeSquat = crouched ? -1.15 : -0.12
     const speed = crouched ? 7 : 9
     const phase = Math.sin(t * speed)
     const idle = Math.sin(t * 2.2)
@@ -103,37 +171,26 @@ export function PlayerModel({ locomotion, muzzle }: PlayerModelProps) {
     let leanZ = 0
     let hipY = 0
 
-    let lShoulder = { x: -0.95, y: 0.52, z: -0.42 }
-    let rShoulder = { x: -1.05, y: -0.22, z: 0.32 }
-    let lElbow = { x: 1.25, y: 0.15, z: 0.08 }
-    let rElbow = { x: 1.12, y: 0, z: 0.05 }
-    let lHand = { x: 0.15, y: 0.2, z: 0.1 }
-    let rHand = { x: 0.18, y: 0.08, z: 0 }
+    let rShoulder = aiming
+      ? { x: 1.28, y: -0.08, z: 0.14 }
+      : { x: 1.08, y: -0.16, z: 0.3 }
+    let rElbow = aiming ? { x: -0.88, y: 0, z: 0 } : { x: -1.18, y: 0, z: 0.06 }
+    let rHand = aiming ? { x: 0.04, y: 0.02, z: 0 } : { x: 0.16, y: 0.06, z: 0 }
     let lThigh = { x: squat, y: 0, z: 0 }
     let rThigh = { x: squat, y: 0, z: 0 }
     let lKnee = { x: kneeSquat, y: 0, z: 0 }
     let rKnee = { x: kneeSquat, y: 0, z: 0 }
-    let lFoot = { x: crouched ? 0.12 : -0.08, y: 0, z: 0 }
-    let rFoot = { x: crouched ? 0.12 : -0.08, y: 0, z: 0 }
-
-    if (aiming) {
-      lShoulder = { x: -1.22, y: 0.38, z: -0.28 }
-      rShoulder = { x: -1.32, y: -0.12, z: 0.18 }
-      lElbow = { x: 1.05, y: 0.05, z: 0.04 }
-      rElbow = { x: 0.82, y: 0, z: 0 }
-      lHand = { x: 0.05, y: 0.1, z: 0.05 }
-      rHand = { x: 0.05, y: 0.04, z: 0 }
-    }
+    let lFoot = { x: crouched ? 0.35 : 0.06, y: 0, z: 0 }
+    let rFoot = { x: crouched ? 0.35 : 0.06, y: 0, z: 0 }
 
     if (!grounded) {
       lThigh.x = squat + 0.35
       rThigh.x = squat + 0.5
-      lKnee.x = kneeSquat + 0.4
-      rKnee.x = kneeSquat + 0.55
-      lFoot.x = 0.2
-      rFoot.x = 0.28
-      lShoulder.x -= 0.12
-      rShoulder.x -= 0.08
+      lKnee.x = kneeSquat - 0.35
+      rKnee.x = kneeSquat - 0.45
+      lFoot.x = 0.25
+      rFoot.x = 0.3
+      rShoulder.x += 0.08
     } else if (moving) {
       bobY += Math.abs(phase) * 0.035 * step
       hipY = phase * 0.08 * step
@@ -141,9 +198,9 @@ export function PlayerModel({ locomotion, muzzle }: PlayerModelProps) {
       const leftSwing = phase * 0.55 * step
       const rightSwing = -phase * 0.55 * step
       if (aiming) {
-        const walkSwing = walk !== 0 ? walk : 0
-        lThigh.x = squat + leftSwing * (walkSwing || 0.35)
-        rThigh.x = squat + rightSwing * (walkSwing || 0.35)
+        const walkScale = walk !== 0 ? walk : 0.35
+        lThigh.x = squat + leftSwing * walkScale
+        rThigh.x = squat + rightSwing * walkScale
         if (strafe !== 0) {
           leanZ = -strafe * 0.12 * step
           bobX = phase * 0.04 * strafe * step
@@ -155,20 +212,15 @@ export function PlayerModel({ locomotion, muzzle }: PlayerModelProps) {
         rThigh.x = squat + rightSwing
       }
 
-      lKnee.x = kneeSquat + Math.max(0, -leftSwing) * 0.85 + Math.max(0, leftSwing) * 0.2
-      rKnee.x = kneeSquat + Math.max(0, -rightSwing) * 0.85 + Math.max(0, rightSwing) * 0.2
-      lFoot.x = crouched ? 0.1 : -0.12 + Math.max(0, leftSwing) * 0.25
-      rFoot.x = crouched ? 0.1 : -0.12 + Math.max(0, rightSwing) * 0.25
-
-      lShoulder.z += phase * 0.04
-      rShoulder.z -= phase * 0.04
-      lElbow.x += idle * 0.02
+      lKnee.x = kneeSquat - Math.max(0, -leftSwing) * 0.85 - Math.max(0, leftSwing) * 0.2
+      rKnee.x = kneeSquat - Math.max(0, -rightSwing) * 0.85 - Math.max(0, rightSwing) * 0.2
+      lFoot.x = crouched ? 0.28 : 0.06 + Math.max(0, leftSwing) * 0.2
+      rFoot.x = crouched ? 0.28 : 0.06 + Math.max(0, rightSwing) * 0.2
+      rShoulder.z += phase * 0.03
       rElbow.x += idle * 0.02
     } else {
       bobY += idle * (crouched ? 0.018 : 0.032)
-      lShoulder.x += idle * 0.03
-      rShoulder.x += idle * 0.03
-      lElbow.x += idle * 0.02
+      rShoulder.x += idle * 0.025
     }
 
     if (bob.current) {
@@ -178,11 +230,8 @@ export function PlayerModel({ locomotion, muzzle }: PlayerModelProps) {
       bob.current.rotation.z = damp(bob.current.rotation.z, leanZ, POSE_LAMBDA, delta)
     }
 
-    dampEuler(leftShoulder.current, lShoulder.x, lShoulder.y, lShoulder.z, POSE_LAMBDA, delta)
     dampEuler(rightShoulder.current, rShoulder.x, rShoulder.y, rShoulder.z, POSE_LAMBDA, delta)
-    dampEuler(leftElbow.current, lElbow.x, lElbow.y, lElbow.z, POSE_LAMBDA, delta)
     dampEuler(rightElbow.current, rElbow.x, rElbow.y, rElbow.z, POSE_LAMBDA, delta)
-    dampEuler(leftHand.current, lHand.x, lHand.y, lHand.z, POSE_LAMBDA, delta)
     dampEuler(rightHand.current, rHand.x, rHand.y, rHand.z, POSE_LAMBDA, delta)
     dampEuler(leftThigh.current, lThigh.x, lThigh.y, lThigh.z, POSE_LAMBDA, delta)
     dampEuler(rightThigh.current, rThigh.x, rThigh.y, rThigh.z, POSE_LAMBDA, delta)
@@ -190,6 +239,16 @@ export function PlayerModel({ locomotion, muzzle }: PlayerModelProps) {
     dampEuler(rightKnee.current, rKnee.x, rKnee.y, rKnee.z, POSE_LAMBDA, delta)
     dampEuler(leftFoot.current, lFoot.x, lFoot.y, lFoot.z, POSE_LAMBDA, delta)
     dampEuler(rightFoot.current, rFoot.x, rFoot.y, rFoot.z, POSE_LAMBDA, delta)
+
+    if (rightShoulder.current && grip.current && bob.current) {
+      rightShoulder.current.updateWorldMatrix(true, true)
+      grip.current.getWorldPosition(_target)
+      _pole.set(0.05, 0.18, -0.42)
+      bob.current.localToWorld(_pole)
+      if (leftShoulder.current && leftElbow.current && leftHand.current) {
+        applyTwoBoneIK(leftShoulder.current, leftElbow.current, leftHand.current, _target, _pole, delta)
+      }
+    }
   })
 
   return (
@@ -218,6 +277,7 @@ export function PlayerModel({ locomotion, muzzle }: PlayerModelProps) {
           <group ref={rightHand} position={[0, -0.24, 0]}>
             <Box size={[0.08, 0.08, 0.1]} position={[0, -0.03, -0.02]} color={HAND} />
             <Gun />
+            <group ref={grip} position={[0.02, 0.0, -0.3]} />
             <group ref={muzzle} position={[0.02, 0.01, -0.58]} rotation={[0, Math.PI, 0]} />
           </group>
         </group>
