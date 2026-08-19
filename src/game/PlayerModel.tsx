@@ -275,7 +275,7 @@ export function PlayerModel({ locomotion, muzzle }: PlayerModelProps) {
         )
       }
     }
-  })
+  }, 1)
 
   return (
     <group ref={bob}>
